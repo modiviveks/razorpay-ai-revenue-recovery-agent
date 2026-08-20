@@ -309,6 +309,9 @@
             document.getElementById('audit-trail-placeholder').classList.add('hidden');
             const container = document.getElementById('audit-trail-container');
             container.classList.remove('hidden');
+            // On compact screens the audit panel sits below the event table.
+            // Bring it into view so Inspect always has visible feedback.
+            requestAnimationFrame(() => container.scrollIntoView({ behavior: 'smooth', block: 'start' }));
 
             document.getElementById('audit-payment-id').innerText = paymentId;
             document.getElementById('audit-strategy').innerText = strategy;
