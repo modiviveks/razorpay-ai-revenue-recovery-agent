@@ -92,6 +92,9 @@ def test_dashboard_apis_return_recovery_data(client):
     audit = client.get(f"/api/audit-trail/{event['action']['id']}")
     assert audit.status_code == 200
     assert any(step["step"] == "PAYMENT_LINK_PAID" for step in audit.json())
+    chain = client.get(f"/api/audit-trail/{event['action']['id']}/verify")
+    assert chain.status_code == 200
+    assert chain.json()["status"] == "VALID"
 
 
 def test_high_value_action_requires_then_accepts_merchant_approval(client):
@@ -216,3 +219,27 @@ def test_active_promise_to_pay_stops_a_repeat_receivables_chaser(client):
     assert outcomes.status_code == 200
     receivables = next(row for row in outcomes.json() if row["risk_type"] == "RECEIVABLE_OVERDUE")
     assert receivables["stopped"] >= 1
+
+
+def test_outbox_is_completed_after_mock_inline_processing(client):
+    from models import RecoveryOutbox, OutboxStatus
+    payload = get_checkout_abandoned_payload()
+    payload["payload"]["checkout"]["entity"]["id"] = f"checkout_outbox_{uuid.uuid4().hex}"
+    payload["payload"]["checkout"]["entity"]["order_id"] = f"order_outbox_{uuid.uuid4().hex}"
+    response = client.post("/webhook/razorpay", json=payload, headers={
+        "X-Test-Simulator": "true", "X-Razorpay-Event-Id": f"evt_outbox_{uuid.uuid4().hex}"
+    })
+    assert response.status_code == 200
+    from database import SessionLocal
+    with SessionLocal() as session:
+        job = session.query(RecoveryOutbox).order_by(RecoveryOutbox.id.desc()).first()
+        assert job.status == OutboxStatus.COMPLETED
+
+
+def test_synthetic_experiment_is_explicitly_labelled(client):
+    response = client.post("/api/experiments/simulate?sample_size=200&seed=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["label"].startswith("SIMULATED")
+    assert data["sample_size"] == 200
+    assert "incremental_recovered_revenue_paise" in data

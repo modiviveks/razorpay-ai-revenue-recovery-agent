@@ -1,7 +1,7 @@
 """Recovery Pipeline orchestrator: ties classification, strategy, execution and logging together."""
 
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 from models import (
@@ -13,9 +13,7 @@ from agent.strategy import determine_strategy
 from agent.executor import execute_recovery, log_audit_step
 from agent.intelligence import assess_recovery
 from agent.advisor import generate_advice
-from agent.recovery_model import RecoveryPropensityModel, feature_row, FEATURE_VERSION
 from agent.next_best_action import rank_candidates
-from config import settings
 
 def run_recovery_pipeline(
     db: Session,
@@ -55,14 +53,6 @@ def run_recovery_pipeline(
         retry_query = retry_query.filter(PaymentEvent.payment_id == event.payment_id)
     previous_retries = retry_query.count()
 
-    # Customer-experience gate: we only create drafts/links; still, repeated
-    # recovery interventions are suppressed before a model can rank them.
-    recent_cutoff = datetime.now(timezone.utc).replace(microsecond=0)
-    recent_actions = db.query(RecoveryAction).join(PaymentEvent).filter(
-        PaymentEvent.customer_email == event.customer_email,
-        RecoveryAction.status.in_([ActionStatus.SUCCESS, ActionStatus.EXECUTING, ActionStatus.RECOVERED]),
-    ).count() if event.customer_email else 0
-
     # An active B2B promise-to-pay is a hard stopping rule. We still record the
     # new overdue signal, but do not issue another collection link before the
     # customer commitment expires or is explicitly marked broken.
@@ -82,11 +72,20 @@ def run_recovery_pipeline(
             .first()
         )
         
-    # 2. Determine Strategy & Enforce Bounds
+    # 2. Rank only policy-allowed candidates. Policy still applies the final
+    # retry, amount, approval and promise-to-pay constraints below.
+    candidates = rank_candidates(
+        failure_class=failure_class, amount_paise=event.amount, method=event.method,
+        retry_count=previous_retries, risk_type=event.risk_type,
+        merchant_segment=event.merchant_segment or "standard",
+    )
+    selected_candidate = candidates[0] if candidates else None
+    # 3. Determine Strategy & Enforce Bounds
     strategy_res = determine_strategy(
         failure_class=failure_class,
         previous_retries=previous_retries,
-        amount_paise=event.amount
+        amount_paise=event.amount,
+        proposed_strategy=selected_candidate.strategy if selected_candidate else None,
     )
     if active_promise:
         from agent.strategy import StrategyResult
@@ -100,23 +99,15 @@ def run_recovery_pipeline(
                 f"is due on {active_promise.promised_for.isoformat()}."
             ),
         )
-    elif recent_actions >= settings.MAX_CUSTOMER_INTERVENTIONS:
-        from agent.strategy import StrategyResult
-        strategy_res = StrategyResult(RecoveryStrategy.ESCALATE_TO_HUMAN, ActionStatus.SKIPPED, 0, "Customer-experience safety: intervention limit reached; suppress automated contact and escalate.")
     assessment = assess_recovery(
         failure_class=failure_class,
         strategy=strategy_res.strategy,
         amount_paise=event.amount,
         previous_retries=previous_retries,
     )
-    historical_success_rate = (db.query(RecoveryAction).filter(RecoveryAction.status == ActionStatus.RECOVERED).count() /
-                               max(1, db.query(RecoveryAction).count()))
-    model = RecoveryPropensityModel()
-    prediction = model.predict(feature_row(failure_class=failure_class.value, method=event.method or "unknown", amount_paise=event.amount,
-        retry_count=previous_retries, hours_since_failure=0, historical_success_rate=historical_success_rate,
-        hour=datetime.now(timezone.utc).hour, merchant_segment=event.merchant_segment, risk_type=event.risk_type,
-        candidate_strategy=strategy_res.strategy.value))
-    candidates = rank_candidates(failure_class, event.amount, event.method, previous_retries, event.risk_type, event.merchant_segment)
+    # The learned model probability is evidence; the old transparent score
+    # remains as a fallback comparison only.
+    model_probability = selected_candidate.probability if selected_candidate else assessment.confidence
     advice = generate_advice(
         failure_class=failure_class,
         strategy=strategy_res.strategy,
@@ -135,15 +126,19 @@ def run_recovery_pipeline(
         rationale=classification_rationale if failure_class != FailureClass.UNKNOWN else strategy_res.rationale,
         is_bounded=strategy_res.is_bounded,
         max_retries_allowed=strategy_res.max_retries,
-        recovery_confidence=prediction.confidence,
-        predicted_probability=prediction.probability,
-        expected_recovery_amount=round(event.amount * prediction.probability),
-        expected_recovery_value=next((c.expected_value for c in candidates if c.strategy == strategy_res.strategy), 0),
-        decision_factors=json.dumps(prediction.factors + assessment.factors),
-        candidate_scores=json.dumps([c.__dict__ | {"strategy": c.strategy.value} for c in candidates]),
-        model_version=prediction.model_version, feature_version=FEATURE_VERSION,
-        policy_version=settings.POLICY_VERSION, action_version=settings.ACTION_VERSION,
-        approval_expires_at=(datetime.now(timezone.utc) + timedelta(hours=settings.APPROVAL_TTL_HOURS)) if strategy_res.status == ActionStatus.PENDING_APPROVAL else None,
+        recovery_confidence=assessment.confidence,
+        expected_recovery_amount=selected_candidate.expected_value if selected_candidate else assessment.expected_recovery_amount,
+        decision_factors=json.dumps(assessment.factors),
+        model_version=selected_candidate.model_version if selected_candidate else "fallback-priors-v1",
+        model_probability=model_probability,
+        model_features=json.dumps(selected_candidate.features if selected_candidate else {}),
+        candidate_scores=json.dumps([
+            {"strategy": candidate.strategy.value, "probability": candidate.probability,
+             "expected_recovery_value_paise": candidate.expected_value, "intervention_cost_paise": candidate.cost,
+             "net_score_paise": candidate.score, "selected": candidate == selected_candidate}
+            for candidate in candidates
+        ]),
+        intervention_cost=selected_candidate.cost if selected_candidate else 0,
         ai_advice=advice.summary,
         ai_advice_source=advice.source,
     )
@@ -160,8 +155,7 @@ def run_recovery_pipeline(
             f"Classified payment failure as {failure_class.value}. "
             f"Selected recovery strategy: {strategy_res.strategy.value}. "
             f"Rule rationale: {strategy_res.rationale} "
-            f"Previous attempts: {previous_retries}. Model top candidate: {candidates[0].strategy.value}; "
-            f"final action is policy-controlled ({strategy_res.strategy.value})."
+            f"Previous attempts: {previous_retries}. Model candidate probability: {model_probability:.1%}."
         ),
         outcome="SUCCESS"
     )

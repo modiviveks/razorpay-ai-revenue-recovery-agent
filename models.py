@@ -72,6 +72,9 @@ class PaymentEvent(Base):
     risk_type = Column(String(40), default="PAYMENT_FAILURE", nullable=False)
     source_reference = Column(String(100), nullable=True)
     due_at = Column(DateTime, nullable=True)
+    experiment_id = Column(String(80), nullable=True, index=True)
+    experiment_variant = Column(String(20), nullable=True, index=True)  # control/treatment
+    merchant_segment = Column(String(40), default="standard")
 
     # Error fields from Razorpay
     error_code = Column(String(50), nullable=True)
@@ -88,9 +91,6 @@ class PaymentEvent(Base):
     # Meta
     webhook_event_id = Column(String(100), nullable=True, index=True)
     raw_payload = Column(Text, nullable=True)
-    experiment_id = Column(String(100), nullable=True, index=True)
-    experiment_variant = Column(String(20), default="treatment", nullable=False, index=True)
-    merchant_segment = Column(String(30), default="standard", nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -123,17 +123,15 @@ class RecoveryAction(Base):
     ai_advice = Column(Text, nullable=True)
     ai_advice_source = Column(String(30), nullable=True)
     model_version = Column(String(80), nullable=True)
-    feature_version = Column(String(40), nullable=True)
-    predicted_probability = Column(Float, nullable=True)
-    expected_recovery_value = Column(Integer, nullable=True)
+    model_probability = Column(Float, nullable=True)
+    model_features = Column(Text, nullable=True)
     candidate_scores = Column(Text, nullable=True)
-    policy_version = Column(String(40), nullable=True)
-    action_version = Column(String(40), nullable=True)
-    approval_actor_id = Column(String(100), nullable=True)
-    approval_actor_role = Column(String(50), nullable=True)
+    policy_version = Column(String(40), default="policy-v1")
+    intervention_cost = Column(Integer, default=0)  # paise
+    approved_by = Column(String(100), nullable=True)
+    approved_role = Column(String(40), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
     approval_reason = Column(Text, nullable=True)
-    approval_timestamp = Column(DateTime, nullable=True)
-    approval_expires_at = Column(DateTime, nullable=True)
 
     # Bounds
     is_bounded = Column(Boolean, default=True)
@@ -160,10 +158,10 @@ class AuditLog(Base):
     api_response = Column(Text, nullable=True)
     outcome = Column(String(20), nullable=True)  # SUCCESS, FAILED, SKIPPED
     error_detail = Column(Text, nullable=True)
-
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     previous_hash = Column(String(64), nullable=True)
     current_hash = Column(String(64), nullable=True, index=True)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     action = relationship("RecoveryAction", back_populates="audit_logs")
@@ -194,20 +192,37 @@ class PromiseToPay(Base):
 class OutboxStatus(str, enum.Enum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
-    COMPLETE = "COMPLETE"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
     DEAD_LETTER = "DEAD_LETTER"
 
 
 class RecoveryOutbox(Base):
-    """Durable job created atomically with an accepted webhook event."""
+    """Durable handoff between verified webhook intake and recovery execution."""
     __tablename__ = "recovery_outbox"
     __table_args__ = (UniqueConstraint("event_id", name="uq_recovery_outbox_event_id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(Integer, ForeignKey("payment_events.id"), nullable=False, index=True)
+    failure_class_hint = Column(String(50), nullable=True)
+    rationale_hint = Column(Text, nullable=True)
     status = Column(SAEnum(OutboxStatus), default=OutboxStatus.PENDING, nullable=False, index=True)
     attempts = Column(Integer, default=0, nullable=False)
-    available_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    available_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     last_error = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    processed_at = Column(DateTime, nullable=True)
+    event = relationship("PaymentEvent")
+
+
+class ExperimentRun(Base):
+    """Persisted simulated control/treatment measurement, never real merchant revenue."""
+    __tablename__ = "experiment_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id = Column(String(80), unique=True, nullable=False, index=True)
+    sample_size = Column(Integer, nullable=False)
+    seed = Column(Integer, nullable=False)
+    model_version = Column(String(80), nullable=False)
+    results_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

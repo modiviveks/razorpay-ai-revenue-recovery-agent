@@ -49,14 +49,9 @@ class Settings:
     # Set this in a shared/deployed environment. Empty intentionally keeps the
     # bundled local demo frictionless.
     DASHBOARD_API_KEY: str = os.getenv("DASHBOARD_API_KEY", "")
-    PROCESS_OUTBOX_INLINE: bool = env_bool("PROCESS_OUTBOX_INLINE", False)
-    MODEL_PATH: str = os.getenv("MODEL_PATH", "./models/recovery_propensity.joblib")
-    MODEL_VERSION: str = os.getenv("MODEL_VERSION", "recovery-propensity-v1")
-    POLICY_VERSION: str = "policy-v2"
-    ACTION_VERSION: str = "nba-v1"
-    CUSTOMER_COOLDOWN_HOURS: int = env_int("CUSTOMER_COOLDOWN_HOURS", 24)
-    MAX_CUSTOMER_INTERVENTIONS: int = env_int("MAX_CUSTOMER_INTERVENTIONS", 4)
-    APPROVAL_TTL_HOURS: int = env_int("APPROVAL_TTL_HOURS", 24)
+    # Local mock demos process the durable outbox immediately. Deployments set
+    # this false and run `python -m agent.worker` separately.
+    PROCESS_OUTBOX_INLINE: bool = env_bool("PROCESS_OUTBOX_INLINE", MOCK_RAZORPAY)
 
 
 settings = Settings()

@@ -1,7 +1,8 @@
 """Events and audit APIs for dashboard visualization."""
 
 import json
-from datetime import datetime, timezone
+import hashlib
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
@@ -12,8 +13,10 @@ from models import (
     PaymentEvent, RecoveryAction, AuditLog, ActionStatus, RecoveryStrategy,
     PromiseToPay, PromiseStatus,
 )
-from agent.executor import execute_recovery, log_audit_step, verify_audit_chain
+from agent.executor import execute_recovery, log_audit_step
 from config import settings
+from simulator.experiment import run_experiment
+from models import ExperimentRun
 
 router = APIRouter(prefix="/api", tags=["API"])
 
@@ -21,10 +24,10 @@ router = APIRouter(prefix="/api", tags=["API"])
 class PromiseToPayRequest(BaseModel):
     promised_for: datetime
     amount: int | None = Field(default=None, ge=1)
+
+
 class ApprovalRequest(BaseModel):
-    actor_id: str = "local-merchant"
-    actor_role: str = "merchant_admin"
-    reason: str = Field(default="Reviewed high-value recovery", max_length=500)
+    reason: str = Field(default="Merchant approved high-value recovery", min_length=3, max_length=300)
 
 
 def require_dashboard_key(x_dashboard_key: str = Header(default=None)):
@@ -68,9 +71,6 @@ def get_events(limit: int = 50, db: Session = Depends(get_db)):
                 "decision_factors": json.loads(action.decision_factors or "[]"),
                 "ai_advice": action.ai_advice,
                 "ai_advice_source": action.ai_advice_source,
-                "model_version": action.model_version, "predicted_probability": action.predicted_probability,
-                "expected_recovery_value": action.expected_recovery_value,
-                "candidate_scores": json.loads(action.candidate_scores or "[]"), "policy_version": action.policy_version,
             }
             
         result.append({
@@ -109,15 +109,12 @@ def get_audit_trail(action_id: int, db: Session = Depends(get_db)):
             "api_response": log.api_response,
             "outcome": log.outcome,
             "error_detail": log.error_detail,
+            "previous_hash": log.previous_hash,
+            "current_hash": log.current_hash,
             "created_at": log.created_at.isoformat()
         }
         for log in logs
     ]
-
-@router.get("/audit-trail/{action_id}/verify", dependencies=[Depends(require_dashboard_key)])
-def verify_audit(action_id: int, db: Session = Depends(get_db)):
-    if not db.get(RecoveryAction, action_id): raise HTTPException(status_code=404, detail="Recovery action not found")
-    return {"action_id": action_id, "integrity": "VALID" if verify_audit_chain(db, action_id) else "INVALID"}
 
 
 @router.get("/stats", dependencies=[Depends(require_dashboard_key)])
@@ -185,8 +182,6 @@ def get_stats(db: Session = Depends(get_db)):
             (db.query(func.sum(RecoveryAction.expected_recovery_amount)).scalar() or 0) / 100,
             2,
         ),
-        "eligible_revenue_rupees": round((db.query(func.sum(PaymentEvent.amount)).join(RecoveryAction).filter(RecoveryAction.status.notin_([ActionStatus.SKIPPED, ActionStatus.BOUNDS_EXCEEDED, ActionStatus.PROMISE_ACTIVE])).scalar() or 0) / 100, 2),
-        "actions_stopped": db.query(RecoveryAction).filter(RecoveryAction.status.in_([ActionStatus.SKIPPED, ActionStatus.BOUNDS_EXCEEDED, ActionStatus.PROMISE_ACTIVE])).count(),
     }
 
 
@@ -228,39 +223,70 @@ def get_outcomes_by_signal(db: Session = Depends(get_db)):
         for row in rows
     ]
 
-@router.get("/experiments", dependencies=[Depends(require_dashboard_key)])
-def get_experiment_results(db: Session = Depends(get_db)):
-    """Observed cohort reporting; never labels control's natural recovery as intervention value."""
-    rows = db.query(PaymentEvent.experiment_id, PaymentEvent.experiment_variant, func.count(PaymentEvent.id), func.coalesce(func.sum(PaymentEvent.amount), 0), func.coalesce(func.sum(case((RecoveryAction.status == ActionStatus.RECOVERED, PaymentEvent.amount), else_=0)), 0)).outerjoin(RecoveryAction).filter(PaymentEvent.experiment_id.is_not(None)).group_by(PaymentEvent.experiment_id, PaymentEvent.experiment_variant).all()
-    grouped = {}
-    for exp, variant, events, at_risk, recovered in rows:
-        grouped.setdefault(exp, {})[variant] = {"events": events, "at_risk_rupees": round(at_risk/100,2), "recovered_rupees":round(recovered/100,2), "recovery_rate": round(recovered/max(1,at_risk),4)}
-    return [{"experiment_id": exp, "label": "OBSERVED EVENT DATA", "variants": variants,
-             "incremental_recovered_revenue_rupees": round(variants.get("treatment",{}).get("recovered_rupees",0)-variants.get("control",{}).get("recovered_rupees",0),2)} for exp, variants in grouped.items()]
+
+@router.post("/experiments/simulate", dependencies=[Depends(require_dashboard_key)])
+def simulate_experiment(sample_size: int = 10_000, seed: int = 2026, db: Session = Depends(get_db)):
+    if not settings.MOCK_RAZORPAY:
+        raise HTTPException(status_code=403, detail="Synthetic experiments are only available in mock mode")
+    if not 100 <= sample_size <= 50_000:
+        raise HTTPException(status_code=422, detail="sample_size must be between 100 and 50000")
+    return run_experiment(db, sample_size=sample_size, seed=seed)
+
+
+@router.get("/experiments/latest", dependencies=[Depends(require_dashboard_key)])
+def latest_experiment(db: Session = Depends(get_db)):
+    record = db.query(ExperimentRun).order_by(ExperimentRun.created_at.desc()).first()
+    return json.loads(record.results_json) if record else None
+
+
+@router.get("/audit-trail/{action_id}/verify", dependencies=[Depends(require_dashboard_key)])
+def verify_audit_chain(action_id: int, db: Session = Depends(get_db)):
+    logs = db.query(AuditLog).filter(AuditLog.action_id == action_id).order_by(AuditLog.id.asc()).all()
+    previous_hash = "GENESIS"
+    for log in logs:
+        canonical = json.dumps({"previous_hash": previous_hash, "action_id": log.action_id,
+                                "timestamp": log.created_at.isoformat(), "step": log.step,
+                                "reasoning": log.reasoning or "", "outcome": log.outcome or ""},
+                               sort_keys=True, separators=(",", ":"))
+        expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        if log.previous_hash != previous_hash or log.current_hash != expected:
+            return {"status": "INVALID", "invalid_log_id": log.id}
+        previous_hash = log.current_hash
+    return {"status": "VALID", "entries": len(logs), "head_hash": previous_hash if logs else None}
 
 
 @router.post("/actions/{action_id}/approve", dependencies=[Depends(require_dashboard_key)])
-def approve_recovery_action(action_id: int, data: ApprovalRequest | None = None, db: Session = Depends(get_db)):
+def approve_recovery_action(
+    action_id: int,
+    request_data: ApprovalRequest = ApprovalRequest(),
+    x_actor_id: str = Header(default=None),
+    x_actor_role: str = Header(default=None),
+    db: Session = Depends(get_db),
+):
     """Execute a high-value action only after explicit merchant approval."""
     action = db.get(RecoveryAction, action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Recovery action not found")
     if action.status != ActionStatus.PENDING_APPROVAL:
         raise HTTPException(status_code=409, detail=f"Action is {action.status.value}, not awaiting approval")
+    if datetime.now(timezone.utc) > action.created_at.replace(tzinfo=timezone.utc) + timedelta(hours=settings.PAYMENT_LINK_EXPIRY_HOURS):
+        raise HTTPException(status_code=409, detail="Approval window has expired")
+    actor_id = x_actor_id or ("local-demo-merchant" if settings.MOCK_RAZORPAY else None)
+    actor_role = x_actor_role or ("merchant_admin" if settings.MOCK_RAZORPAY else None)
+    if not actor_id or actor_role not in {"merchant_admin", "finance_admin"}:
+        raise HTTPException(status_code=403, detail="A merchant_admin or finance_admin actor is required")
 
-    data = data or ApprovalRequest()
-    if data.actor_role not in {"merchant_admin", "merchant_owner"}: raise HTTPException(status_code=403, detail="Actor role cannot approve recovery actions")
-    expiry = action.approval_expires_at
-    if expiry and expiry.tzinfo is None: expiry = expiry.replace(tzinfo=timezone.utc)
-    if expiry and expiry < datetime.now(timezone.utc): raise HTTPException(status_code=409, detail="Approval window has expired")
-    action.status = ActionStatus.PENDING; action.approval_actor_id = data.actor_id; action.approval_actor_role = data.actor_role
-    action.approval_reason = data.reason; action.approval_timestamp = datetime.now(timezone.utc)
+    action.status = ActionStatus.PENDING
+    action.approved_by = actor_id
+    action.approved_role = actor_role
+    action.approved_at = datetime.now(timezone.utc)
+    action.approval_reason = request_data.reason
     db.commit()
     log_audit_step(
         db=db,
         action_id=action.id,
         step="MERCHANT_APPROVED",
-        reasoning=f"Approved by {data.actor_role}:{data.actor_id}. Reason: {data.reason}",
+        reasoning=f"{actor_role} {actor_id} explicitly approved this high-value recovery action: {request_data.reason}",
         outcome="SUCCESS",
     )
     execute_recovery(db, action, action.event)

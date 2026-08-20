@@ -22,7 +22,8 @@ class StrategyResult:
 def determine_strategy(
     failure_class: FailureClass,
     previous_retries: int,
-    amount_paise: int
+    amount_paise: int,
+    proposed_strategy: RecoveryStrategy | None = None,
 ) -> StrategyResult:
     """Enforces retry bounds and returns the corresponding RecoveryStrategy."""
 
@@ -110,6 +111,14 @@ def determine_strategy(
         "max_retries": 0,
         "rationale": "Unknown failure class fallback. Escalating to human."
     })
+    # A model-ranked candidate is accepted only when it is in the policy's
+    # explicitly allowed alternatives for this class. Otherwise this policy
+    # default is retained.
+    from agent.next_best_action import POLICY_CANDIDATES
+    allowed = POLICY_CANDIDATES.get(failure_class, [rule["strategy"]])
+    if proposed_strategy in allowed:
+        rule = {**rule, "strategy": proposed_strategy,
+                "rationale": f"Policy allowed model-ranked candidate: {proposed_strategy.value}. {rule['rationale']}"}
 
     # Rule 2: Upper bound check (max retries exceeded)
     max_retries = rule["max_retries"]

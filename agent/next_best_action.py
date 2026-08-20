@@ -1,24 +1,59 @@
-"""Candidate scoring after policy eligibility; the model may rank, never permit."""
+"""Rank only policy-allowed recovery candidates using propensity and friction."""
+
 from dataclasses import dataclass
-from models import RecoveryStrategy
-from agent.recovery_model import RecoveryPropensityModel, feature_row
+
+from agent.recovery_model import build_features, predict
+from models import FailureClass, RecoveryStrategy
+
+
+INTERVENTION_COST_PAISE = {
+    RecoveryStrategy.RETRY_PAYMENT_LINK: 35,
+    RecoveryStrategy.ALTERNATE_METHOD_LINK: 45,
+    RecoveryStrategy.COLLECT_RECEIVABLE_LINK: 60,
+    RecoveryStrategy.REQUEST_MANDATE_UPDATE: 15,
+    RecoveryStrategy.ESCALATE_TO_HUMAN: 250,
+    RecoveryStrategy.NO_ACTION: 0,
+}
+
+
+POLICY_CANDIDATES = {
+    FailureClass.UPI_TIMEOUT: [RecoveryStrategy.RETRY_PAYMENT_LINK],
+    FailureClass.BANK_DECLINE: [RecoveryStrategy.RETRY_PAYMENT_LINK, RecoveryStrategy.ALTERNATE_METHOD_LINK],
+    FailureClass.PAYMENT_CANCELLED: [RecoveryStrategy.RETRY_PAYMENT_LINK],
+    FailureClass.CARD_EXPIRED: [RecoveryStrategy.ALTERNATE_METHOD_LINK],
+    FailureClass.INSUFFICIENT_FUNDS: [RecoveryStrategy.ALTERNATE_METHOD_LINK],
+    FailureClass.CHECKOUT_ABANDONED: [RecoveryStrategy.RETRY_PAYMENT_LINK],
+    FailureClass.RECEIVABLE_OVERDUE: [RecoveryStrategy.COLLECT_RECEIVABLE_LINK],
+    FailureClass.SUBSCRIPTION_PENDING: [RecoveryStrategy.REQUEST_MANDATE_UPDATE],
+    FailureClass.SUBSCRIPTION_HALTED: [RecoveryStrategy.REQUEST_MANDATE_UPDATE],
+    FailureClass.SUBSCRIPTION_FAILED: [RecoveryStrategy.REQUEST_MANDATE_UPDATE],
+}
+
 
 @dataclass(frozen=True)
 class CandidateScore:
-    strategy: RecoveryStrategy; probability: float; expected_value: int; allowed: bool; reason: str
+    strategy: RecoveryStrategy
+    probability: float
+    expected_value: int
+    cost: int
+    score: int
+    model_version: str
+    features: dict[str, object]
 
-def rank_candidates(failure_class, amount_paise, method, retries, risk_type, merchant_segment="standard") -> list[CandidateScore]:
-    candidates = [RecoveryStrategy.RETRY_PAYMENT_LINK, RecoveryStrategy.ALTERNATE_METHOD_LINK, RecoveryStrategy.SEND_REMINDER,
-                  RecoveryStrategy.REQUEST_MANDATE_UPDATE, RecoveryStrategy.COLLECT_RECEIVABLE_LINK, RecoveryStrategy.ESCALATE_TO_HUMAN, RecoveryStrategy.NO_ACTION]
-    model = RecoveryPropensityModel(); output=[]
-    friction = {RecoveryStrategy.RETRY_PAYMENT_LINK: 100, RecoveryStrategy.ALTERNATE_METHOD_LINK: 150, RecoveryStrategy.SEND_REMINDER: 50,
-                RecoveryStrategy.REQUEST_MANDATE_UPDATE: 75, RecoveryStrategy.COLLECT_RECEIVABLE_LINK: 125, RecoveryStrategy.ESCALATE_TO_HUMAN: 500, RecoveryStrategy.NO_ACTION: 0}
-    for candidate in candidates:
-        row = feature_row(failure_class=failure_class.value, method=method or "unknown", amount_paise=amount_paise, retry_count=retries,
-                          merchant_segment=merchant_segment, risk_type=risk_type, candidate_strategy=candidate.value)
-        prediction = model.predict(row)
-        # Actions that cannot collect directly have no claimed immediate recovery value.
-        eligible = candidate not in {RecoveryStrategy.SEND_REMINDER, RecoveryStrategy.REQUEST_MANDATE_UPDATE, RecoveryStrategy.ESCALATE_TO_HUMAN, RecoveryStrategy.NO_ACTION}
-        value = round(prediction.probability * amount_paise - friction[candidate]) if eligible else 0
-        output.append(CandidateScore(candidate, prediction.probability, value, eligible, "ranked after deterministic policy" if eligible else "non-collecting or no-action candidate"))
-    return sorted(output, key=lambda item: item.expected_value, reverse=True)
+
+def rank_candidates(*, failure_class: FailureClass, amount_paise: int, method: str | None,
+                    retry_count: int, risk_type: str, merchant_segment: str) -> list[CandidateScore]:
+    candidates = POLICY_CANDIDATES.get(failure_class, [RecoveryStrategy.ESCALATE_TO_HUMAN])
+    scores = []
+    for strategy in candidates:
+        features = build_features(failure_class=failure_class, strategy=strategy, amount_paise=amount_paise,
+                                  method=method, retry_count=retry_count, risk_type=risk_type,
+                                  merchant_segment=merchant_segment)
+        prediction = predict(features)
+        cost = INTERVENTION_COST_PAISE[strategy]
+        expected = round(prediction.probability * amount_paise)
+        # A transparent friction penalty avoids treating every action as free.
+        friction_penalty = 50 if strategy == RecoveryStrategy.ALTERNATE_METHOD_LINK else 0
+        scores.append(CandidateScore(strategy, prediction.probability, expected, cost,
+                                     expected - cost - friction_penalty, prediction.model_version, features))
+    return sorted(scores, key=lambda score: score.score, reverse=True)

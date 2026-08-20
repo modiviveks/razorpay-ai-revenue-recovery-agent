@@ -4,6 +4,7 @@ import time
 import json
 import re
 import hashlib
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from models import RecoveryAction, PaymentEvent, AuditLog, ActionStatus, RecoveryStrategy
 from razorpay_client.client import razorpay_client
@@ -27,33 +28,34 @@ def log_audit_step(
     outcome: str = None,
     error_detail: str = None
 ):
-    """Creates a database log entry for audits."""
-    previous = db.query(AuditLog).filter(AuditLog.action_id == action_id).order_by(AuditLog.id.desc()).first()
+    """Creates a redacted, tamper-evident audit entry."""
+    previous = (
+        db.query(AuditLog).filter(AuditLog.action_id == action_id)
+        .order_by(AuditLog.id.desc()).first()
+    )
     previous_hash = previous.current_hash if previous else "GENESIS"
-    created_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-    material = "|".join([previous_hash, str(action_id), created_at.isoformat(), step, reasoning or "", outcome or ""])
+    # SQLite stores naive datetimes; use the same canonical UTC representation
+    # in both hash creation and verification across SQLite/PostgreSQL demos.
+    timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+    redacted_reasoning = redact_for_audit(reasoning) or ""
+    canonical = json.dumps({"previous_hash": previous_hash, "action_id": action_id,
+                            "timestamp": timestamp.isoformat(), "step": step,
+                            "reasoning": redacted_reasoning, "outcome": outcome or ""},
+                           sort_keys=True, separators=(",", ":"))
     log = AuditLog(
         action_id=action_id,
         step=step,
-        reasoning=reasoning,
+        reasoning=redacted_reasoning,
         api_call=redact_for_audit(api_call),
         api_response=redact_for_audit(api_response),
         outcome=outcome,
-        error_detail=redact_for_audit(error_detail), created_at=created_at,
-        previous_hash=previous_hash, current_hash=hashlib.sha256(material.encode()).hexdigest(),
+        error_detail=redact_for_audit(error_detail),
+        created_at=timestamp,
+        previous_hash=previous_hash,
+        current_hash=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
     )
     db.add(log)
     db.commit()
-
-
-def verify_audit_chain(db: Session, action_id: int) -> bool:
-    """Verify the immutable ordering and content hash for one action's audit history."""
-    previous_hash = "GENESIS"
-    for log in db.query(AuditLog).filter(AuditLog.action_id == action_id).order_by(AuditLog.id):
-        material = "|".join([previous_hash, str(action_id), log.created_at.isoformat(), log.step, log.reasoning or "", log.outcome or ""])
-        if log.previous_hash != previous_hash or log.current_hash != hashlib.sha256(material.encode()).hexdigest(): return False
-        previous_hash = log.current_hash
-    return True
 
 
 def execute_recovery(db: Session, action: RecoveryAction, event: PaymentEvent):

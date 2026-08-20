@@ -1,26 +1,91 @@
-"""Deterministic, explicitly SIMULATED control/treatment revenue experiment."""
-from __future__ import annotations
-import argparse, json
-import numpy as np
-from agent.recovery_model import RecoveryPropensityModel, feature_row
+"""Reproducible synthetic control/treatment experiment for incremental impact."""
 
-def run_experiment(size: int = 10_000, seed: int = 7) -> dict:
-    rng=np.random.default_rng(seed); model=RecoveryPropensityModel(); model.load()
-    variants={"control": {"at_risk":0,"recovered":0,"interventions":0,"stopped":0}, "treatment": {"at_risk":0,"recovered":0,"interventions":0,"stopped":0}}
-    classes=["UPI_TIMEOUT","BANK_DECLINE","INSUFFICIENT_FUNDS","CARD_EXPIRED","CHECKOUT_ABANDONED","SUBSCRIPTION_FAILED","RECEIVABLE_OVERDUE"]
-    for i in range(size):
-        variant="treatment" if i % 2 else "control"; amount=int(rng.integers(5_000, 200_000)); fc=str(rng.choice(classes)); method=str(rng.choice(["upi","card","netbanking"]))
-        natural={"UPI_TIMEOUT":.16,"BANK_DECLINE":.07,"INSUFFICIENT_FUNDS":.03,"CARD_EXPIRED":.04,"CHECKOUT_ABANDONED":.09,"SUBSCRIPTION_FAILED":.05,"RECEIVABLE_OVERDUE":.12}[fc]
-        row=feature_row(failure_class=fc,method=method,amount_paise=amount,retry_count=0,hours_since_failure=1,historical_success_rate=.4,hour=12,merchant_segment="standard",risk_type="PAYMENT_FAILURE",candidate_strategy="RETRY_PAYMENT_LINK")
-        p=model.predict(row).probability
-        allowed=fc not in {"SUBSCRIPTION_FAILED"} and amount >= 100
-        recovered = rng.random() < (natural if variant=="control" or not allowed else min(.92, natural + .35*p))
-        item=variants[variant]; item["at_risk"] += amount; item["recovered"] += amount if recovered else 0
-        item["interventions"] += int(variant=="treatment" and allowed); item["stopped"] += int(variant=="treatment" and not allowed)
-    for item in variants.values(): item["recovery_rate"] = round(item["recovered"]/item["at_risk"],4)
-    control, treatment=variants["control"],variants["treatment"]
-    return {"label":"SIMULATED — not real Razorpay revenue", "experiment_id":f"sim-{seed}","sample_size":size,"variants":variants,
-            "incremental_recovered_revenue_paise":treatment["recovered"]-control["recovered"], "incremental_lift":round(treatment["recovery_rate"]-control["recovery_rate"],4),
-            "recovery_roi":round((treatment["recovered"]-control["recovered"])/max(1,treatment["interventions"]*100),2)}
+import json
+import random
+import uuid
+from collections import defaultdict
+
+from agent.next_best_action import rank_candidates
+from agent.recovery_model import load_model
+from models import ExperimentRun, FailureClass
+
+
+FAILURES = [FailureClass.UPI_TIMEOUT, FailureClass.BANK_DECLINE, FailureClass.INSUFFICIENT_FUNDS,
+            FailureClass.CARD_EXPIRED, FailureClass.PAYMENT_CANCELLED, FailureClass.CHECKOUT_ABANDONED,
+            FailureClass.RECEIVABLE_OVERDUE]
+
+
+def run_experiment(db, sample_size: int = 10_000, seed: int = 2026, experiment_id: str | None = None):
+    """Simulate balanced variants. Figures are always labelled synthetic."""
+    rng = random.Random(seed)
+    experiment_id = experiment_id or f"sim-{uuid.uuid4().hex[:10]}"
+    aggregate = defaultdict(lambda: {"events": 0, "at_risk": 0, "recovered": 0, "interventions": 0, "stopped": 0})
+    by_failure = defaultdict(lambda: {"control": 0, "treatment": 0, "control_recovered": 0, "treatment_recovered": 0})
+    # Latent recovery rate is intentionally modest. Treatment generates a
+    # synthetic incremental effect only when an eligible intervention is used.
+    natural_base = {FailureClass.UPI_TIMEOUT: .12, FailureClass.BANK_DECLINE: .09,
+                    FailureClass.INSUFFICIENT_FUNDS: .05, FailureClass.CARD_EXPIRED: .07,
+                    FailureClass.PAYMENT_CANCELLED: .10, FailureClass.CHECKOUT_ABANDONED: .08,
+                    FailureClass.RECEIVABLE_OVERDUE: .15}
+    for index in range(sample_size):
+        variant = "treatment" if index % 2 else "control"
+        failure = rng.choice(FAILURES)
+        amount = rng.choice([5_000, 15_000, 35_000, 75_000, 150_000, 300_000])
+        method = rng.choice(["upi", "card", "netbanking"])
+        risk_type = "RECEIVABLE_OVERDUE" if failure == FailureClass.RECEIVABLE_OVERDUE else (
+            "CHECKOUT_ABANDONMENT" if failure == FailureClass.CHECKOUT_ABANDONED else "PAYMENT_FAILURE")
+        bucket = aggregate[variant]
+        bucket["events"] += 1
+        bucket["at_risk"] += amount
+        by_failure[failure.value][variant] += 1
+        natural_probability = natural_base[failure]
+        intervention = None
+        if variant == "treatment":
+            candidates = rank_candidates(failure_class=failure, amount_paise=amount, method=method,
+                                         retry_count=0, risk_type=risk_type, merchant_segment="standard")
+            if candidates and candidates[0].score > 0:
+                intervention = candidates[0]
+                bucket["interventions"] += 1
+                # Fixed synthetic response model, intentionally distinct from
+                # the trained predictor to avoid claiming causal certainty.
+                natural_probability += min(.18, .04 + intervention.probability * .20)
+            else:
+                bucket["stopped"] += 1
+        recovered = rng.random() < natural_probability
+        if recovered:
+            bucket["recovered"] += amount
+            by_failure[failure.value][f"{variant}_recovered"] += amount
+    control, treatment = aggregate["control"], aggregate["treatment"]
+    control_rate = control["recovered"] / max(control["at_risk"], 1)
+    treatment_rate = treatment["recovered"] / max(treatment["at_risk"], 1)
+    incremental_rate = treatment_rate - control_rate
+    incremental_revenue = treatment["recovered"] - round(control_rate * treatment["at_risk"])
+    intervention_cost = treatment["interventions"] * 45
+    results = {
+        "label": "SIMULATED — not real Razorpay merchant revenue",
+        "experiment_id": experiment_id,
+        "sample_size": sample_size,
+        "seed": seed,
+        "model_version": (load_model() or {"metadata": {"model_version": "fallback-priors-v1"}})["metadata"]["model_version"],
+        "control": control,
+        "treatment": treatment,
+        "control_recovery_rate": round(control_rate, 4),
+        "treatment_recovery_rate": round(treatment_rate, 4),
+        "incremental_recovery_rate": round(incremental_rate, 4),
+        "incremental_recovered_revenue_paise": incremental_revenue,
+        "intervention_cost_paise": intervention_cost,
+        "recovery_roi": round((incremental_revenue - intervention_cost) / max(intervention_cost, 1), 2),
+        "by_failure_class": by_failure,
+    }
+    record = ExperimentRun(experiment_id=experiment_id, sample_size=sample_size, seed=seed,
+                           model_version=results["model_version"], results_json=json.dumps(results))
+    db.add(record)
+    db.commit()
+    return results
+
+
 if __name__ == "__main__":
-    parser=argparse.ArgumentParser(); parser.add_argument("--size",type=int,default=10_000); args=parser.parse_args(); print(json.dumps(run_experiment(args.size),indent=2))
+    from database import SessionLocal, init_db
+    init_db()
+    with SessionLocal() as session:
+        print(json.dumps(run_experiment(session), indent=2))
