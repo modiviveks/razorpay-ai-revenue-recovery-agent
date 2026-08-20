@@ -45,3 +45,12 @@ def _add_missing_sqlite_columns():
         for name, definition in required_columns.items():
             if name not in existing_columns:
                 connection.execute(text(f"ALTER TABLE payment_events ADD COLUMN {name} {definition}"))
+    action_columns = {
+        "ai_advice": "TEXT",
+        "ai_advice_source": "VARCHAR(30)",
+    }
+    existing_action_columns = {column["name"] for column in inspect(engine).get_columns("recovery_actions")}
+    with engine.begin() as connection:
+        for name, definition in action_columns.items():
+            if name not in existing_action_columns:
+                connection.execute(text(f"ALTER TABLE recovery_actions ADD COLUMN {name} {definition}"))

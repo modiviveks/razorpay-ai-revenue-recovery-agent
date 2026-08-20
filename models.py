@@ -115,6 +115,10 @@ class RecoveryAction(Base):
     recovery_confidence = Column(Float, nullable=True)
     expected_recovery_amount = Column(Integer, nullable=True)  # paise
     decision_factors = Column(Text, nullable=True)
+    # Advisory AI output is stored separately from the deterministic decision.
+    # It cannot alter the selected strategy or bypass safety bounds.
+    ai_advice = Column(Text, nullable=True)
+    ai_advice_source = Column(String(30), nullable=True)
 
     # Bounds
     is_bounded = Column(Boolean, default=True)

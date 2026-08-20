@@ -62,6 +62,8 @@ def get_events(limit: int = 50, db: Session = Depends(get_db)):
                 "recovery_confidence": action.recovery_confidence,
                 "expected_recovery_amount": action.expected_recovery_amount,
                 "decision_factors": json.loads(action.decision_factors or "[]"),
+                "ai_advice": action.ai_advice,
+                "ai_advice_source": action.ai_advice_source,
             }
             
         result.append({

@@ -37,6 +37,8 @@ class Settings:
 
     # Feature flags
     USE_LLM_EXPLANATIONS: bool = env_bool("USE_LLM_EXPLANATIONS", bool(OPENAI_API_KEY))
+    USE_AI_ADVISOR: bool = env_bool("USE_AI_ADVISOR", bool(OPENAI_API_KEY))
+    AI_ADVISOR_MODEL: str = os.getenv("AI_ADVISOR_MODEL", "gpt-4o-mini")
     MOCK_RAZORPAY: bool = env_bool("MOCK_RAZORPAY", True)
     # Explicitly restricted to local/mock environments. Never enable this in production.
     ALLOW_TEST_WEBHOOK_BYPASS: bool = env_bool("ALLOW_TEST_WEBHOOK_BYPASS", MOCK_RAZORPAY)

@@ -12,6 +12,7 @@ from agent.classifier import classify_failure
 from agent.strategy import determine_strategy
 from agent.executor import execute_recovery, log_audit_step
 from agent.intelligence import assess_recovery
+from agent.advisor import generate_advice
 
 def run_recovery_pipeline(
     db: Session,
@@ -94,6 +95,13 @@ def run_recovery_pipeline(
         amount_paise=event.amount,
         previous_retries=previous_retries,
     )
+    advice = generate_advice(
+        failure_class=failure_class,
+        strategy=strategy_res.strategy,
+        status=strategy_res.status,
+        confidence=assessment.confidence,
+        previous_retries=previous_retries,
+    )
     
     # Create the RecoveryAction record
     action = RecoveryAction(
@@ -108,6 +116,8 @@ def run_recovery_pipeline(
         recovery_confidence=assessment.confidence,
         expected_recovery_amount=assessment.expected_recovery_amount,
         decision_factors=json.dumps(assessment.factors),
+        ai_advice=advice.summary,
+        ai_advice_source=advice.source,
     )
     db.add(action)
     db.commit()
@@ -125,6 +135,13 @@ def run_recovery_pipeline(
             f"Previous attempts: {previous_retries}."
         ),
         outcome="SUCCESS"
+    )
+    log_audit_step(
+        db=db,
+        action_id=action.id,
+        step="AI_ADVISOR",
+        reasoning=f"{advice.source}: {advice.summary}",
+        outcome="ADVISORY",
     )
 
     # 4. Execute Action if Pending

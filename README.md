@@ -19,6 +19,7 @@ This project was built for **Track 03 — AI Revenue Recovery** for the Razorpay
 - Outreach is generated as a draft only. No SMS, email, or WhatsApp message is sent by this service.
 - High-value actions require explicit merchant approval before a payment link is created. Configure the threshold using `REQUIRE_APPROVAL_OVER_PAISE`.
 - Decision confidence is a transparent, rule-based prioritisation signal. It never overrides safety gates or triggers a debit.
+- The **AI Recovery Advisor** turns the already-approved recovery decision into structured merchant guidance and customer-safe context. It receives no customer contact details and is not permitted to change a strategy, retry limit, approval requirement, or stopping rule.
 - Audit evidence redacts email addresses and phone numbers before persistence. Set `DASHBOARD_API_KEY` when exposing dashboard APIs outside a local demo.
 - The dashboard visibly labels Mock Mode and marks its recovery metrics as simulated. Only a real signed Razorpay payment-success webhook should be presented as recovered revenue in production.
 
@@ -36,6 +37,7 @@ This project was built for **Track 03 — AI Revenue Recovery** for the Razorpay
 7. **Webhook Failure Simulator**: A built-in CLI tool simulating 7 payment failure scenarios.
 8. **Multi-Source Revenue Risk**: Supports `payment.failed`, `checkout.abandoned`, `subscription.pending`, `subscription.halted` and normalised `receivable.overdue` signals.
 9. **Promise-to-Pay Tracker**: Records a B2B customer commitment, pauses automatic chasers, and escalates a broken promise to merchant collections review without an auto-debit.
+10. **Constrained AI Recovery Advisor**: Uses an LLM to explain the approved next-best action in context, while deterministic policy remains the sole authority for financial actions.
 
 ---
 
@@ -109,7 +111,12 @@ MOCK_RAZORPAY=true  # Set to false to use actual Razorpay Test Mode keys
 
 ### Recovery intelligence and approval
 
-The agent exposes a deterministic recovery-confidence score and expected recovery value for each eligible action. The score uses the failure class, recovery strategy and prior attempts; it deliberately does not use customer PII or allow an LLM to decide whether money actions are taken.
+The agent has two complementary intelligence layers:
+
+1. **Deterministic recovery scoring** estimates recovery confidence and expected recovery value from failure class, strategy, and prior attempts. This is explainable and does not use customer PII.
+2. **AI Recovery Advisor** uses `gpt-4o-mini` when `OPENAI_API_KEY` and `USE_AI_ADVISOR=true` are set. It receives only the normalised failure class, approved strategy, policy status, confidence, and retry count; it returns a concise merchant explanation. Its prompt explicitly forbids changing a strategy, adding retries, charging a saved method, messaging a customer, or bypassing safety controls.
+
+Without an API key, the advisor shows a clearly-labelled policy fallback so the mock demo remains fully runnable. In the dashboard, click **Inspect** to see the advisor output alongside the audit trail.
 
 To approve a high-value action after merchant review, call `POST /api/actions/{action_id}/approve`. When `DASHBOARD_API_KEY` is configured, pass it as the `X-Dashboard-Key` header to all `/api` endpoints.
 
