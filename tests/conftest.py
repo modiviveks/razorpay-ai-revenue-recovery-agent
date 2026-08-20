@@ -8,6 +8,7 @@ TEST_DB = Path("test_recovery_agent.db")
 os.environ["DATABASE_URL"] = "sqlite:///./test_recovery_agent.db"
 os.environ["MOCK_RAZORPAY"] = "true"
 os.environ["ALLOW_TEST_WEBHOOK_BYPASS"] = "true"
+os.environ["PROCESS_OUTBOX_INLINE"] = "true"
 
 
 def pytest_sessionstart(session):

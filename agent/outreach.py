@@ -63,9 +63,12 @@ def generate_outreach_message(
     amount_rupees = amount_paise / 100.0
     customer_name = name or "Customer"
 
-    # Default rule-based template
-    template = OUTREACH_TEMPLATES.get(failure_class, OUTREACH_TEMPLATES[FailureClass.UNKNOWN])
-    default_message = template.format(name=customer_name, amount=amount_rupees, link=payment_link)
+    # Customer-safe draft: do not disclose sensitive bank/card/balance failure
+    # details. A merchant may review this draft before any external delivery.
+    default_message = (
+        f"Hi {customer_name}, we could not complete your payment of ₹{amount_rupees:.2f}. "
+        f"If you would still like to continue, you can use this secure payment link: {payment_link}"
+    )
 
     # If OpenAI API is enabled, generate via LLM for maximum personalization
     if settings.USE_LLM_EXPLANATIONS and settings.OPENAI_API_KEY:
@@ -76,12 +79,11 @@ def generate_outreach_message(
                 f"- Customer Name: {customer_name}\n"
                 f"- Payment Amount: Rs. {amount_rupees:.2f}\n"
                 f"- Failure Reason Category: {failure_class.value}\n"
-                f"- Failure Description details: {error_description or 'None'}\n"
                 f"- Recovery Checkout Link: {payment_link}\n\n"
                 f"Requirements:\n"
                 f"1. Be extremely polite, helpful and direct.\n"
                 f"2. Clearly reference the checkout link: {payment_link}\n"
-                f"3. Explain the error simply in conversational Hinglish (e.g. 'UPI app timeout ho gaya' or 'decline kiya bank ne').\n"
+                f"3. Never disclose a specific payment failure reason, balance, bank decision, card status, or other sensitive detail.\n"
                 f"4. Length must be short (maximum 2-3 sentences)."
             )
             response = client.chat.completions.create(

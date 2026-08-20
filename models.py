@@ -88,6 +88,9 @@ class PaymentEvent(Base):
     # Meta
     webhook_event_id = Column(String(100), nullable=True, index=True)
     raw_payload = Column(Text, nullable=True)
+    experiment_id = Column(String(100), nullable=True, index=True)
+    experiment_variant = Column(String(20), default="treatment", nullable=False, index=True)
+    merchant_segment = Column(String(30), default="standard", nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -119,6 +122,18 @@ class RecoveryAction(Base):
     # It cannot alter the selected strategy or bypass safety bounds.
     ai_advice = Column(Text, nullable=True)
     ai_advice_source = Column(String(30), nullable=True)
+    model_version = Column(String(80), nullable=True)
+    feature_version = Column(String(40), nullable=True)
+    predicted_probability = Column(Float, nullable=True)
+    expected_recovery_value = Column(Integer, nullable=True)
+    candidate_scores = Column(Text, nullable=True)
+    policy_version = Column(String(40), nullable=True)
+    action_version = Column(String(40), nullable=True)
+    approval_actor_id = Column(String(100), nullable=True)
+    approval_actor_role = Column(String(50), nullable=True)
+    approval_reason = Column(Text, nullable=True)
+    approval_timestamp = Column(DateTime, nullable=True)
+    approval_expires_at = Column(DateTime, nullable=True)
 
     # Bounds
     is_bounded = Column(Boolean, default=True)
@@ -147,6 +162,8 @@ class AuditLog(Base):
     error_detail = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    previous_hash = Column(String(64), nullable=True)
+    current_hash = Column(String(64), nullable=True, index=True)
 
     # Relationships
     action = relationship("RecoveryAction", back_populates="audit_logs")
@@ -172,3 +189,25 @@ class PromiseToPay(Base):
                         onupdate=lambda: datetime.now(timezone.utc))
 
     action = relationship("RecoveryAction")
+
+
+class OutboxStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETE = "COMPLETE"
+    DEAD_LETTER = "DEAD_LETTER"
+
+
+class RecoveryOutbox(Base):
+    """Durable job created atomically with an accepted webhook event."""
+    __tablename__ = "recovery_outbox"
+    __table_args__ = (UniqueConstraint("event_id", name="uq_recovery_outbox_event_id"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(Integer, ForeignKey("payment_events.id"), nullable=False, index=True)
+    status = Column(SAEnum(OutboxStatus), default=OutboxStatus.PENDING, nullable=False, index=True)
+    attempts = Column(Integer, default=0, nullable=False)
+    available_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    completed_at = Column(DateTime, nullable=True)

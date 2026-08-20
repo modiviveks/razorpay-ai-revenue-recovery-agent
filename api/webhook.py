@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Header, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from database import get_db
-from models import PaymentEvent, RecoveryAction, ActionStatus, FailureClass
+from models import PaymentEvent, RecoveryAction, ActionStatus, FailureClass, RecoveryOutbox
 from agent.pipeline import run_recovery_pipeline
 from agent.executor import log_audit_step
 from razorpay_client.client import razorpay_client
@@ -193,6 +193,9 @@ async def handle_razorpay_webhook(
         customer_name=customer_name,
         webhook_event_id=event_key,
         raw_payload=json.dumps(safe_payload, separators=(",", ":")),
+        experiment_id=notes.get("experiment_id"),
+        experiment_variant=notes.get("experiment_variant", "treatment"),
+        merchant_segment=notes.get("merchant_segment", "standard"),
     )
     db.add(event)
     try:
@@ -204,18 +207,26 @@ async def handle_razorpay_webhook(
         existing = db.query(PaymentEvent).filter(PaymentEvent.webhook_event_id == event_key).first()
         return {"status": "duplicate", "event_id": existing.id if existing else None}
     db.refresh(event)
-
-    action = run_recovery_pipeline(
-        db,
-        event,
-        forced_failure_class=forced_failure_class,
-        forced_rationale=forced_rationale,
-    )
+    # Persist work separately: webhook acknowledgement stays cheap and reliable.
+    # Normalised signal class is saved onto the event so the worker can reapply it.
+    if forced_failure_class:
+        event.error_reason = forced_failure_class.value
+        db.commit()
+    outbox = RecoveryOutbox(event_id=event.id)
+    db.add(outbox); db.commit(); db.refresh(outbox)
+    if settings.PROCESS_OUTBOX_INLINE:
+        # Test/demo adapter only; production workers invoke agent.worker.
+        from agent.worker import process_pending_jobs
+        process_pending_jobs()
+        action = db.query(RecoveryAction).filter(RecoveryAction.event_id == event.id).first()
+    else:
+        action = None
     return {
-        "status": "processed",
+        "status": "processed" if action else "queued",
         "event_id": event.id,
-        "failure_class": action.failure_class.value,
-        "strategy": action.strategy.value,
-        "action_status": action.status.value,
-        "new_payment_link": action.new_payment_link_url,
+        "outbox_id": outbox.id,
+        "failure_class": action.failure_class.value if action else None,
+        "strategy": action.strategy.value if action else None,
+        "action_status": action.status.value if action else "QUEUED",
+        "new_payment_link": action.new_payment_link_url if action else None,
     }
