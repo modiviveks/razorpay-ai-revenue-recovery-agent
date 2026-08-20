@@ -16,7 +16,11 @@ def post_webhook(url: str, payload: dict):
         "X-Test-Simulator": "true"
     }
     
-    print(f"\n[Simulator] Posting scenario payload for payment: {payload['payload']['payment']['entity']['id']} ...")
+    event_type = payload.get("event", "unknown")
+    payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
+    payment_link = payload.get("payload", {}).get("payment_link", {}).get("entity", {})
+    entity_id = payment.get("id") or payment_link.get("id") or "unknown"
+    print(f"\n[Simulator] Posting {event_type} webhook for: {entity_id} ...")
     try:
         response = httpx.post(url, json=payload, headers=headers, timeout=5.0)
         if response.status_code == 200:
@@ -27,6 +31,8 @@ def post_webhook(url: str, payload: dict):
             print(f"            - Action Status  : {res_data.get('action_status')}")
             if res_data.get('new_payment_link'):
                 print(f"            - Recovery Link  : {res_data.get('new_payment_link')}")
+            if res_data.get("status") == "recovered":
+                print(f"            - Recovery      : VERIFIED AND ATTRIBUTED")
             return res_data
         else:
             print(f"[Simulator] FAILED: Status code {response.status_code}")

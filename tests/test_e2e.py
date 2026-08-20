@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from main import app
 from simulator.scenarios import get_payment_link_paid_payload
+from config import settings
 
 
 @pytest.fixture(scope="module")
@@ -85,3 +86,42 @@ def test_dashboard_apis_return_recovery_data(client):
     audit = client.get(f"/api/audit-trail/{event['action']['id']}")
     assert audit.status_code == 200
     assert any(step["step"] == "PAYMENT_LINK_PAID" for step in audit.json())
+
+
+def test_high_value_action_requires_then_accepts_merchant_approval(client):
+    suffix = uuid.uuid4().hex
+    payload = {
+        "entity": "event",
+        "event": "payment.failed",
+        "payload": {"payment": {"entity": {
+            "id": f"pay_high_value_{suffix}",
+            "order_id": f"order_high_value_{suffix}",
+            "amount": settings.REQUIRE_APPROVAL_OVER_PAISE,
+            "currency": "INR",
+            "method": "upi",
+            "error_description": "Payment timed out",
+            "error_reason": "payment_timeout",
+        }}},
+    }
+    response = client.post(
+        "/webhook/razorpay",
+        json=payload,
+        headers={"X-Test-Simulator": "true", "X-Razorpay-Event-Id": f"evt_high_value_{suffix}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["action_status"] == "PENDING_APPROVAL"
+
+    event = next(item for item in client.get("/api/events").json() if item["payment_id"] == payload["payload"]["payment"]["entity"]["id"])
+    approval = client.post(f"/api/actions/{event['action']['id']}/approve")
+    assert approval.status_code == 200
+    assert approval.json()["status"] == "SUCCESS"
+
+
+def test_dashboard_key_restricts_dashboard_apis(client):
+    original_key = settings.DASHBOARD_API_KEY
+    settings.DASHBOARD_API_KEY = "demo-key"
+    try:
+        assert client.get("/api/stats").status_code == 401
+        assert client.get("/api/stats", headers={"X-Dashboard-Key": "demo-key"}).status_code == 200
+    finally:
+        settings.DASHBOARD_API_KEY = original_key
