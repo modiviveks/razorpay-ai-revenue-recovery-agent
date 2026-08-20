@@ -9,18 +9,27 @@ from agent.strategy import determine_strategy
 from agent.executor import execute_recovery, log_audit_step
 from agent.intelligence import assess_recovery
 
-def run_recovery_pipeline(db: Session, event: PaymentEvent) -> RecoveryAction:
+def run_recovery_pipeline(
+    db: Session,
+    event: PaymentEvent,
+    forced_failure_class: FailureClass | None = None,
+    forced_rationale: str | None = None,
+) -> RecoveryAction:
     """Orchestrates the classification, strategy, and execution steps for a payment event."""
     
     # 1. Classify failure
-    failure_class, classification_rationale = classify_failure(
-        error_code=event.error_code,
-        error_description=event.error_description,
-        error_source=event.error_source,
-        error_step=event.error_step,
-        error_reason=event.error_reason,
-        method=event.method
-    )
+    if forced_failure_class:
+        failure_class = forced_failure_class
+        classification_rationale = forced_rationale or "Classified from a normalised revenue-risk signal."
+    else:
+        failure_class, classification_rationale = classify_failure(
+            error_code=event.error_code,
+            error_description=event.error_description,
+            error_source=event.error_source,
+            error_step=event.error_step,
+            error_reason=event.error_reason,
+            method=event.method,
+        )
     
     # Count only actual attempts of the same failure class. Skipped and blocked records
     # must not consume a retry quota.

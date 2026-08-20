@@ -74,9 +74,29 @@ def determine_strategy(
             "rationale": "Transient gateway failure. Will retry creating payment link up to 3 times."
         },
         FailureClass.SUBSCRIPTION_FAILED: {
-            "strategy": RecoveryStrategy.SEND_REMINDER,
+            "strategy": RecoveryStrategy.REQUEST_MANDATE_UPDATE,
             "max_retries": 1,
             "rationale": "Subscription charge failed. Sending reminder to update mandate details manually."
+        },
+        FailureClass.SUBSCRIPTION_PENDING: {
+            "strategy": RecoveryStrategy.REQUEST_MANDATE_UPDATE,
+            "max_retries": 1,
+            "rationale": "Subscription is pending after a failed charge. Preserve Razorpay retry behaviour and request a mandate update."
+        },
+        FailureClass.SUBSCRIPTION_HALTED: {
+            "strategy": RecoveryStrategy.REQUEST_MANDATE_UPDATE,
+            "max_retries": 1,
+            "rationale": "Subscription retries are exhausted. Request a payment-method or mandate update; do not auto-charge."
+        },
+        FailureClass.CHECKOUT_ABANDONED: {
+            "strategy": RecoveryStrategy.RETRY_PAYMENT_LINK,
+            "max_retries": 1,
+            "rationale": "Checkout was abandoned. Create one short-lived recovery link and stop after a single attempt."
+        },
+        FailureClass.RECEIVABLE_OVERDUE: {
+            "strategy": RecoveryStrategy.COLLECT_RECEIVABLE_LINK,
+            "max_retries": 2,
+            "rationale": "Receivable is overdue. Create a time-bound collection link and record any customer promise to pay."
         },
         FailureClass.UNKNOWN: {
             "strategy": RecoveryStrategy.ESCALATE_TO_HUMAN,

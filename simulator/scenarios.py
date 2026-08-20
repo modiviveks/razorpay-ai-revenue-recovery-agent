@@ -144,6 +144,60 @@ def get_below_minimum_payload():
     return payload
 
 
+def get_checkout_abandoned_payload():
+    """Normalised checkout signal emitted by the merchant application."""
+    return {
+        "entity": "event",
+        "event": "checkout.abandoned",
+        "created_at": int(time.time()),
+        "payload": {"checkout": {"entity": {
+            "id": "checkout_abandoned_123",
+            "order_id": "order_checkout_abandoned_123",
+            "amount": 45_000,
+            "currency": "INR",
+            "method": "upi",
+            "email": "customer.test@example.com",
+            "contact": "+919876543210",
+            "notes": {"customer_name": "Rajesh Kumar"},
+        }}},
+    }
+
+
+def get_subscription_pending_payload():
+    """Razorpay-style subscription lifecycle signal for mandate recovery."""
+    return {
+        "entity": "event",
+        "event": "subscription.pending",
+        "created_at": int(time.time()),
+        "payload": {"subscription": {"entity": {
+            "id": "sub_pending_123",
+            "amount": 150_000,
+            "currency": "INR",
+            "email": "customer.test@example.com",
+            "contact": "+919876543210",
+            "notes": {"customer_name": "Rajesh Kumar"},
+        }}},
+    }
+
+
+def get_receivable_overdue_payload():
+    """Normalised ERP/accounting signal for an overdue B2B invoice."""
+    return {
+        "entity": "event",
+        "event": "receivable.overdue",
+        "created_at": int(time.time()),
+        "payload": {"receivable": {"entity": {
+            "id": "inv_overdue_123",
+            "amount": 300_000,
+            "currency": "INR",
+            "due_at": int(time.time()) - 86_400,
+            "email": "ap@customer.example.com",
+            "contact": "+919876543210",
+            "notes": {"customer_name": "Acme Accounts"},
+        }}},
+    }
+
+
 SCENARIOS = {
     "upi_timeout": get_upi_timeout_payload,
     "card_expired": get_card_expired_payload,
@@ -152,6 +206,9 @@ SCENARIOS = {
     "bank_decline": get_bank_decline_payload,
     "subscription_failed": get_subscription_failed_payload,
     "below_minimum": get_below_minimum_payload
+    ,"checkout_abandoned": get_checkout_abandoned_payload
+    ,"subscription_pending": get_subscription_pending_payload
+    ,"receivable_overdue": get_receivable_overdue_payload
 }
 
 

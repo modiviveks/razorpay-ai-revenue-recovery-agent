@@ -4,6 +4,8 @@
 
 An intelligent revenue recovery agent built to automate payment failure recovery loops on Razorpay APIs. It listens to payment failures, classifies the error cause, enforces recovery rules & safety bounds, generates alternate payment links via Razorpay APIs, and maintains a detailed step-by-step decision audit trail on a dashboard.
 
+It also accepts normalised merchant signals for checkout abandonment and overdue receivables, plus Razorpay-style subscription lifecycle events. Each signal enters the same bounded, auditable recovery policy.
+
 This project was built for **Track 03 — AI Revenue Recovery** for the Razorpay hackathon.
 
 ---
@@ -31,6 +33,8 @@ This project was built for **Track 03 — AI Revenue Recovery** for the Razorpay
 5. **Detailed Decision Audit Trail**: A complete step-by-step reasoning log for every money action, showing raw API payloads and outcomes.
 6. **Live Interactive Dashboard**: Built with FastAPI, Tailwind CSS, and HTML5 to monitor recovery status, success rates, and inspect agent audit logs.
 7. **Webhook Failure Simulator**: A built-in CLI tool simulating 7 payment failure scenarios.
+8. **Multi-Source Revenue Risk**: Supports `payment.failed`, `checkout.abandoned`, `subscription.pending`, `subscription.halted` and normalised `receivable.overdue` signals.
+9. **Promise-to-Pay Tracker**: Records a B2B customer commitment, pauses automatic chasers, and escalates a broken promise to merchant collections review without an auto-debit.
 
 ---
 
@@ -108,7 +112,18 @@ The agent exposes a deterministic recovery-confidence score and expected recover
 
 To approve a high-value action after merchant review, call `POST /api/actions/{action_id}/approve`. When `DASHBOARD_API_KEY` is configured, pass it as the `X-Dashboard-Key` header to all `/api` endpoints.
 
-For production deployment, use a transactional database and migrations, move webhook execution to an outbox/worker, and integrate consented delivery plus holdout-group measurement. Subscription recovery should consume Razorpay subscription lifecycle events (`subscription.pending` and `subscription.halted`) rather than treating recurring failures like one-time checkout failures.
+For production deployment, use a transactional database and migrations, move webhook execution to an outbox/worker, and integrate consented delivery plus holdout-group measurement. `checkout.abandoned` and `receivable.overdue` are intentionally normalised merchant/ERP signals, not claimed to be native Razorpay webhooks.
+
+### Revenue-risk coverage
+
+| Signal | Bounded intervention | Stop condition |
+| --- | --- | --- |
+| `payment.failed` | Retry or alternate-method Payment Link | Error-specific retry cap / recovery confirmation |
+| `checkout.abandoned` | One short-lived recovery link | One attempt only |
+| `subscription.pending` / `subscription.halted` | Mandate-update outreach draft | Never auto-charge; preserve subscription lifecycle controls |
+| `receivable.overdue` | Time-bound collection link and promise-to-pay record | Promise pauses chasers; broken promise goes to merchant review |
+
+Record a promise using `POST /api/actions/{action_id}/promise-to-pay` with `promised_for` as an ISO timestamp. A broken promise is escalated through `POST /api/promises/{promise_id}/mark-broken`.
 
 ---
 

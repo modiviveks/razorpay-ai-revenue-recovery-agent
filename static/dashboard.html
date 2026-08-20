@@ -90,7 +90,7 @@
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="bg-gray-50 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-gray-100">
-                                <th class="px-6 py-3.5">Payment Details</th>
+                                <th class="px-6 py-3.5">Revenue-Risk Signal</th>
                                 <th class="px-6 py-3.5">Failure Class</th>
                                 <th class="px-6 py-3.5">Recovery Strategy</th>
                                 <th class="px-6 py-3.5">Status</th>
@@ -179,7 +179,7 @@
                         <tr>
                             <td colspan="5" class="px-6 py-10 text-center text-gray-400">
                                 <i class="fa-solid fa-circle-info text-xl mb-2"></i>
-                                <p>No payment failures recorded yet. Run simulator to generate events!</p>
+                                <p>No revenue-risk events recorded yet. Run simulator to generate events!</p>
                             </td>
                         </tr>
                     `;
@@ -190,6 +190,7 @@
                     const action = e.action || {};
                     const actionStatus = action.status || 'SKIPPED';
                     const amountRupees = (e.amount / 100).toFixed(2);
+                    const riskType = e.risk_type || 'PAYMENT_FAILURE';
                     
                     let statusBadgeClass = 'bg-gray-100 text-gray-700';
                     if (actionStatus === 'SUCCESS') statusBadgeClass = 'bg-emerald-100 text-emerald-800 border border-emerald-200';
@@ -198,6 +199,7 @@
                     else if (actionStatus === 'BOUNDS_EXCEEDED') statusBadgeClass = 'bg-red-100 text-red-800 border border-red-200';
                     else if (actionStatus === 'SKIPPED') statusBadgeClass = 'bg-gray-100 text-gray-700 border border-gray-200';
                     else if (actionStatus === 'EXECUTING') statusBadgeClass = 'bg-blue-100 text-blue-800 animate-pulse';
+                    else if (actionStatus === 'PENDING_APPROVAL') statusBadgeClass = 'bg-amber-100 text-amber-800 border border-amber-200';
 
                     const inspectBtn = action.id 
                         ? `<button onclick="viewAuditTrail(${action.id}, '${e.payment_id}', '${actionStatus}', '${action.strategy}')" class="p-2 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-lg transition inline-flex items-center gap-1.5 text-xs font-semibold">
@@ -216,7 +218,9 @@
                             <td class="px-6 py-4.5">
                                 <div class="font-semibold text-gray-900 text-sm">${e.customer_name || 'Anonymous'}</div>
                                 <div class="text-xs text-gray-500 font-mono mt-0.5">${e.payment_id}</div>
+                                <div class="text-[10px] font-bold text-indigo-600 mt-1">${riskType}</div>
                                 <div class="text-xs font-semibold text-gray-700 mt-1">₹${amountRupees} • ${e.method ? e.method.toUpperCase() : 'UNKNOWN'}</div>
+                                ${e.due_at ? `<div class="text-[10px] text-amber-700 mt-1">Due: ${new Date(e.due_at).toLocaleDateString('en-IN')}</div>` : ''}
                             </td>
                             <td class="px-6 py-4.5">
                                 <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 font-medium text-xs border border-slate-200">

@@ -42,6 +42,13 @@ OUTREACH_TEMPLATES = {
         "Hi {name}, payment decline ho gaya tha. "
         "Please check karke is secure link par click karein: {link}"
     )
+    ,FailureClass.CHECKOUT_ABANDONED: (
+        "Hi {name}, aapka checkout complete nahi ho paaya. Agar aap payment complete karna chahte hain, "
+        "toh is secure link se retry karein: {link}"
+    )
+    ,FailureClass.RECEIVABLE_OVERDUE: (
+        "Hi {name}, aapka outstanding payment pending hai. Aap is secure link se invoice settle kar sakte hain: {link}"
+    )
 }
 
 

@@ -1,16 +1,26 @@
 """Events and audit APIs for dashboard visualization."""
 
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Header
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db
-from models import PaymentEvent, RecoveryAction, AuditLog, ActionStatus, RecoveryStrategy
+from models import (
+    PaymentEvent, RecoveryAction, AuditLog, ActionStatus, RecoveryStrategy,
+    PromiseToPay, PromiseStatus,
+)
 from agent.executor import execute_recovery, log_audit_step
 from config import settings
 
 router = APIRouter(prefix="/api", tags=["API"])
+
+
+class PromiseToPayRequest(BaseModel):
+    promised_for: datetime
+    amount: int | None = Field(default=None, ge=1)
 
 
 def require_dashboard_key(x_dashboard_key: str = Header(default=None)):
@@ -61,6 +71,8 @@ def get_events(limit: int = 50, db: Session = Depends(get_db)):
             "amount": e.amount,
             "currency": e.currency,
             "method": e.method,
+            "risk_type": e.risk_type,
+            "due_at": e.due_at.isoformat() if e.due_at else None,
             "error_description": e.error_description,
             "customer_name": e.customer_name,
             "created_at": e.created_at.isoformat(),
@@ -181,3 +193,71 @@ def approve_recovery_action(action_id: int, db: Session = Depends(get_db)):
     )
     execute_recovery(db, action, action.event)
     return {"status": action.status.value, "action_id": action.id}
+
+
+@router.post("/actions/{action_id}/promise-to-pay", dependencies=[Depends(require_dashboard_key)])
+def record_promise_to_pay(action_id: int, request_data: PromiseToPayRequest, db: Session = Depends(get_db)):
+    """Record a B2B payment commitment and stop automatic chasers for that promise."""
+    action = db.get(RecoveryAction, action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Recovery action not found")
+    if action.event.risk_type != "RECEIVABLE_OVERDUE":
+        raise HTTPException(status_code=409, detail="Promises to pay are only supported for overdue receivables")
+    promised_for = request_data.promised_for
+    if promised_for.tzinfo is None:
+        promised_for = promised_for.replace(tzinfo=timezone.utc)
+    if promised_for <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=422, detail="Promised date must be in the future")
+
+    promise = PromiseToPay(
+        action_id=action.id,
+        amount=request_data.amount or action.event.amount,
+        promised_for=promised_for,
+        status=PromiseStatus.OPEN,
+    )
+    db.add(promise)
+    db.commit()
+    db.refresh(promise)
+    log_audit_step(
+        db=db,
+        action_id=action.id,
+        step="PROMISE_TO_PAY_RECORDED",
+        reasoning=f"Customer promise recorded for ₹{promise.amount / 100:.2f} by {promise.promised_for.isoformat()}. Automatic chasers are paused for this commitment.",
+        outcome="SUCCESS",
+    )
+    return {"id": promise.id, "status": promise.status.value, "promised_for": promise.promised_for.isoformat()}
+
+
+@router.post("/promises/{promise_id}/mark-broken", dependencies=[Depends(require_dashboard_key)])
+def mark_promise_broken(promise_id: int, db: Session = Depends(get_db)):
+    """Escalate a broken promise without attempting an automatic debit."""
+    promise = db.get(PromiseToPay, promise_id)
+    if not promise:
+        raise HTTPException(status_code=404, detail="Promise not found")
+    if promise.status != PromiseStatus.OPEN:
+        raise HTTPException(status_code=409, detail=f"Promise is already {promise.status.value}")
+    promise.status = PromiseStatus.BROKEN
+    db.commit()
+    log_audit_step(
+        db=db,
+        action_id=promise.action_id,
+        step="PROMISE_TO_PAY_BROKEN",
+        reasoning="Promise-to-pay was not met. Escalated to merchant collections review; no automatic debit attempted.",
+        outcome="REVIEW",
+    )
+    return {"id": promise.id, "status": promise.status.value, "next_step": "MERCHANT_COLLECTIONS_REVIEW"}
+
+
+@router.get("/promises", dependencies=[Depends(require_dashboard_key)])
+def get_promises(db: Session = Depends(get_db)):
+    promises = db.query(PromiseToPay).order_by(PromiseToPay.promised_for.asc()).all()
+    return [
+        {
+            "id": promise.id,
+            "action_id": promise.action_id,
+            "amount": promise.amount,
+            "promised_for": promise.promised_for.isoformat(),
+            "status": promise.status.value,
+        }
+        for promise in promises
+    ]

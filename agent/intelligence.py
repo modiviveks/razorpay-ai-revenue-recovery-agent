@@ -19,6 +19,10 @@ BASE_RECOVERY_PROBABILITY = {
     FailureClass.INSUFFICIENT_FUNDS: 0.18,
     FailureClass.CARD_EXPIRED: 0.22,
     FailureClass.SUBSCRIPTION_FAILED: 0.20,
+    FailureClass.SUBSCRIPTION_PENDING: 0.24,
+    FailureClass.SUBSCRIPTION_HALTED: 0.14,
+    FailureClass.CHECKOUT_ABANDONED: 0.36,
+    FailureClass.RECEIVABLE_OVERDUE: 0.42,
     FailureClass.UNKNOWN: 0.05,
 }
 
@@ -37,7 +41,11 @@ def assess_recovery(
     previous_retries: int,
 ) -> RecoveryAssessment:
     """Estimate recovery likelihood without using customer PII or an LLM."""
-    if strategy in (RecoveryStrategy.NO_ACTION, RecoveryStrategy.ESCALATE_TO_HUMAN):
+    if strategy in (
+        RecoveryStrategy.NO_ACTION,
+        RecoveryStrategy.ESCALATE_TO_HUMAN,
+        RecoveryStrategy.REQUEST_MANDATE_UPDATE,
+    ):
         return RecoveryAssessment(0.0, 0, ["No automatic collection opportunity is being scored."])
 
     confidence = BASE_RECOVERY_PROBABILITY[failure_class]

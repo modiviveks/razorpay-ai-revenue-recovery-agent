@@ -48,7 +48,11 @@ def execute_recovery(db: Session, action: RecoveryAction, event: PaymentEvent):
     strategy = action.strategy
     amount_in_paise = event.amount
 
-    if strategy in (RecoveryStrategy.RETRY_PAYMENT_LINK, RecoveryStrategy.ALTERNATE_METHOD_LINK):
+    if strategy in (
+        RecoveryStrategy.RETRY_PAYMENT_LINK,
+        RecoveryStrategy.ALTERNATE_METHOD_LINK,
+        RecoveryStrategy.COLLECT_RECEIVABLE_LINK,
+    ):
         # We need to construct a payment link request
         expire_by = int(time.time()) + (settings.PAYMENT_LINK_EXPIRY_HOURS * 3600)
         
@@ -137,7 +141,7 @@ def execute_recovery(db: Session, action: RecoveryAction, event: PaymentEvent):
                 error_detail=str(e)
             )
 
-    elif strategy == RecoveryStrategy.SEND_REMINDER:
+    elif strategy in (RecoveryStrategy.SEND_REMINDER, RecoveryStrategy.REQUEST_MANDATE_UPDATE):
         customer_name = event.customer_name or "Customer"
         action.outreach_message = (
             f"Hi {customer_name}, your recurring payment could not be completed. "

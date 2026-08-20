@@ -1,12 +1,18 @@
 """Integration tests for the complete webhook recovery lifecycle."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
 from main import app
-from simulator.scenarios import get_payment_link_paid_payload
+from simulator.scenarios import (
+    get_payment_link_paid_payload,
+    get_checkout_abandoned_payload,
+    get_subscription_pending_payload,
+    get_receivable_overdue_payload,
+)
 from config import settings
 
 
@@ -125,3 +131,56 @@ def test_dashboard_key_restricts_dashboard_apis(client):
         assert client.get("/api/stats", headers={"X-Dashboard-Key": "demo-key"}).status_code == 200
     finally:
         settings.DASHBOARD_API_KEY = original_key
+
+
+def test_checkout_abandonment_creates_one_bounded_recovery_link(client):
+    payload = get_checkout_abandoned_payload()
+    payload["payload"]["checkout"]["entity"]["id"] += uuid.uuid4().hex
+    payload["payload"]["checkout"]["entity"]["order_id"] += uuid.uuid4().hex
+    response = client.post(
+        "/webhook/razorpay",
+        json=payload,
+        headers={"X-Test-Simulator": "true", "X-Razorpay-Event-Id": f"evt_checkout_{uuid.uuid4().hex}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["failure_class"] == "CHECKOUT_ABANDONED"
+    assert response.json()["strategy"] == "RETRY_PAYMENT_LINK"
+    assert response.json()["new_payment_link"]
+
+
+def test_subscription_pending_requests_mandate_update_without_auto_charge(client):
+    payload = get_subscription_pending_payload()
+    payload["payload"]["subscription"]["entity"]["id"] += uuid.uuid4().hex
+    response = client.post(
+        "/webhook/razorpay",
+        json=payload,
+        headers={"X-Test-Simulator": "true", "X-Razorpay-Event-Id": f"evt_subscription_{uuid.uuid4().hex}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["failure_class"] == "SUBSCRIPTION_PENDING"
+    assert response.json()["strategy"] == "REQUEST_MANDATE_UPDATE"
+    assert response.json()["new_payment_link"] is None
+
+
+def test_receivable_promise_to_pay_is_recorded_and_can_be_escalated(client):
+    payload = get_receivable_overdue_payload()
+    invoice_id = payload["payload"]["receivable"]["entity"]["id"] + uuid.uuid4().hex
+    payload["payload"]["receivable"]["entity"]["id"] = invoice_id
+    response = client.post(
+        "/webhook/razorpay",
+        json=payload,
+        headers={"X-Test-Simulator": "true", "X-Razorpay-Event-Id": f"evt_invoice_{uuid.uuid4().hex}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["strategy"] == "COLLECT_RECEIVABLE_LINK"
+    event = next(item for item in client.get("/api/events").json() if item["payment_id"] == invoice_id)
+    assert event["risk_type"] == "RECEIVABLE_OVERDUE"
+
+    promise = client.post(
+        f"/api/actions/{event['action']['id']}/promise-to-pay",
+        json={"promised_for": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()},
+    )
+    assert promise.status_code == 200
+    broken = client.post(f"/api/promises/{promise.json()['id']}/mark-broken")
+    assert broken.status_code == 200
+    assert broken.json()["next_step"] == "MERCHANT_COLLECTIONS_REVIEW"

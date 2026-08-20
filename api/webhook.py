@@ -2,17 +2,34 @@
 
 import json
 import hashlib
+from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Header, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from database import get_db
-from models import PaymentEvent, RecoveryAction, ActionStatus
+from models import PaymentEvent, RecoveryAction, ActionStatus, FailureClass
 from agent.pipeline import run_recovery_pipeline
 from agent.executor import log_audit_step
 from razorpay_client.client import razorpay_client
 from config import settings
 
 router = APIRouter(prefix="/webhook", tags=["Webhook"])
+
+
+RISK_SIGNAL_CONFIG = {
+    "checkout.abandoned": ("checkout", FailureClass.CHECKOUT_ABANDONED, "CHECKOUT_ABANDONMENT"),
+    "subscription.pending": ("subscription", FailureClass.SUBSCRIPTION_PENDING, "SUBSCRIPTION_PENDING"),
+    "subscription.halted": ("subscription", FailureClass.SUBSCRIPTION_HALTED, "SUBSCRIPTION_HALTED"),
+    # A normalised application event for invoices managed outside a payment
+    # gateway. It is intentionally not presented as a native Razorpay event.
+    "receivable.overdue": ("receivable", FailureClass.RECEIVABLE_OVERDUE, "RECEIVABLE_OVERDUE"),
+}
+
+
+def _to_datetime(value):
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, timezone.utc)
+    return None
 
 @router.post("/razorpay")
 async def handle_razorpay_webhook(
@@ -104,19 +121,27 @@ async def handle_razorpay_webhook(
         )
         return {"status": "recovered", "action_id": action.id, "payment_link_id": payment_link_id}
 
-    if event_type != "payment.failed":
+    risk_config = RISK_SIGNAL_CONFIG.get(event_type)
+    if event_type != "payment.failed" and not risk_config:
         return {"status": "ignored", "message": f"Event type {event_type} not handled."}
 
-    # Extract payment entity
     payload = data.get("payload", {})
-    payment = payload.get("payment", {}).get("entity", {})
+    if risk_config:
+        entity_key, forced_failure_class, risk_type = risk_config
+        payment = payload.get(entity_key, {}).get("entity", {})
+        forced_rationale = f"Received {event_type} revenue-risk signal and applied its dedicated bounded workflow."
+    else:
+        payment = payload.get("payment", {}).get("entity", {})
+        forced_failure_class = None
+        forced_rationale = None
+        risk_type = "PAYMENT_FAILURE"
     if not payment:
-        raise HTTPException(status_code=400, detail="Invalid payload: missing payment entity")
+        raise HTTPException(status_code=400, detail="Invalid payload: missing source entity")
 
     payment_id = payment.get("id")
-    amount = payment.get("amount")
+    amount = payment.get("amount", payment.get("outstanding_amount"))
     if not payment_id or not isinstance(amount, int) or amount < 0:
-        raise HTTPException(status_code=400, detail="Invalid payload: payment id and non-negative integer amount are required")
+        raise HTTPException(status_code=400, detail="Invalid payload: source id and non-negative integer amount are required")
 
     # Razorpay's event ID header is preferred. A body hash protects local test
     # traffic and providers that omit it from duplicate delivery.
@@ -143,7 +168,8 @@ async def handle_razorpay_webhook(
     # The event record retains structured fields needed for recovery, but audit
     # payloads redact direct contact details to reduce unnecessary PII exposure.
     safe_payload = json.loads(body_str)
-    safe_payment = safe_payload.get("payload", {}).get("payment", {}).get("entity", {})
+    entity_key = "payment" if event_type == "payment.failed" else RISK_SIGNAL_CONFIG[event_type][0]
+    safe_payment = safe_payload.get("payload", {}).get(entity_key, {}).get("entity", {})
     safe_payment.pop("email", None)
     safe_payment.pop("contact", None)
 
@@ -153,7 +179,10 @@ async def handle_razorpay_webhook(
         amount=amount,
         currency=payment.get("currency", "INR"),
         method=payment.get("method"),
-        status="failed",
+        status="at_risk",
+        risk_type=risk_type,
+        source_reference=payment_id,
+        due_at=_to_datetime(payment.get("due_at")),
         error_code=payment.get("error_code"),
         error_description=payment.get("error_description"),
         error_source=payment.get("error_source"),
@@ -176,7 +205,12 @@ async def handle_razorpay_webhook(
         return {"status": "duplicate", "event_id": existing.id if existing else None}
     db.refresh(event)
 
-    action = run_recovery_pipeline(db, event)
+    action = run_recovery_pipeline(
+        db,
+        event,
+        forced_failure_class=forced_failure_class,
+        forced_rationale=forced_rationale,
+    )
     return {
         "status": "processed",
         "event_id": event.id,

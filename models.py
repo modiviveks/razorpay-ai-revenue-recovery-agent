@@ -22,6 +22,10 @@ class FailureClass(str, enum.Enum):
     AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
     BANK_DECLINE = "BANK_DECLINE"
     SUBSCRIPTION_FAILED = "SUBSCRIPTION_FAILED"
+    CHECKOUT_ABANDONED = "CHECKOUT_ABANDONED"
+    SUBSCRIPTION_PENDING = "SUBSCRIPTION_PENDING"
+    SUBSCRIPTION_HALTED = "SUBSCRIPTION_HALTED"
+    RECEIVABLE_OVERDUE = "RECEIVABLE_OVERDUE"
     UNKNOWN = "UNKNOWN"
 
 
@@ -31,6 +35,8 @@ class RecoveryStrategy(str, enum.Enum):
     ALTERNATE_METHOD_LINK = "ALTERNATE_METHOD_LINK"
     ESCALATE_TO_HUMAN = "ESCALATE_TO_HUMAN"
     NO_ACTION = "NO_ACTION"
+    COLLECT_RECEIVABLE_LINK = "COLLECT_RECEIVABLE_LINK"
+    REQUEST_MANDATE_UPDATE = "REQUEST_MANDATE_UPDATE"
 
 
 class ActionStatus(str, enum.Enum):
@@ -60,6 +66,11 @@ class PaymentEvent(Base):
     currency = Column(String(10), default="INR")
     method = Column(String(30), nullable=True)  # card, upi, netbanking, wallet
     status = Column(String(20), default="failed")
+    # Normalised revenue-risk source. Non-payment signals use their own source
+    # reference in ``payment_id`` for backwards-compatible correlation.
+    risk_type = Column(String(40), default="PAYMENT_FAILURE", nullable=False)
+    source_reference = Column(String(100), nullable=True)
+    due_at = Column(DateTime, nullable=True)
 
     # Error fields from Razorpay
     error_code = Column(String(50), nullable=True)
@@ -134,3 +145,25 @@ class AuditLog(Base):
 
     # Relationships
     action = relationship("RecoveryAction", back_populates="audit_logs")
+
+
+class PromiseStatus(str, enum.Enum):
+    OPEN = "OPEN"
+    KEPT = "KEPT"
+    BROKEN = "BROKEN"
+
+
+class PromiseToPay(Base):
+    """A customer commitment that pauses automatic receivables escalation."""
+    __tablename__ = "promises_to_pay"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    action_id = Column(Integer, ForeignKey("recovery_actions.id"), nullable=False)
+    amount = Column(Integer, nullable=False)  # paise
+    promised_for = Column(DateTime, nullable=False)
+    status = Column(SAEnum(PromiseStatus), default=PromiseStatus.OPEN, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    action = relationship("RecoveryAction")

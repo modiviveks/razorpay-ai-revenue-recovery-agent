@@ -17,9 +17,15 @@ def post_webhook(url: str, payload: dict):
     }
     
     event_type = payload.get("event", "unknown")
-    payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
-    payment_link = payload.get("payload", {}).get("payment_link", {}).get("entity", {})
-    entity_id = payment.get("id") or payment_link.get("id") or "unknown"
+    entities = payload.get("payload", {})
+    entity_id = next(
+        (
+            value.get("entity", {}).get("id")
+            for value in entities.values()
+            if isinstance(value, dict) and isinstance(value.get("entity"), dict)
+        ),
+        "unknown",
+    )
     print(f"\n[Simulator] Posting {event_type} webhook for: {entity_id} ...")
     try:
         response = httpx.post(url, json=payload, headers=headers, timeout=5.0)
