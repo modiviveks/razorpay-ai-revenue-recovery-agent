@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Text, Enum as SAEnum,
-    ForeignKey, Boolean,
+    ForeignKey, Boolean, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from database import Base
@@ -41,12 +41,17 @@ class ActionStatus(str, enum.Enum):
     RECOVERED = "RECOVERED"
     SKIPPED = "SKIPPED"
     BOUNDS_EXCEEDED = "BOUNDS_EXCEEDED"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+    RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
 
 
 # ─── Models ──────────────────────────────────────────────────────────────────
 
 class PaymentEvent(Base):
     __tablename__ = "payment_events"
+    __table_args__ = (
+        UniqueConstraint("webhook_event_id", name="uq_payment_events_webhook_event_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     payment_id = Column(String(50), nullable=False)
@@ -69,7 +74,7 @@ class PaymentEvent(Base):
     customer_name = Column(String(100), nullable=True)
 
     # Meta
-    webhook_event_id = Column(String(100), nullable=True)
+    webhook_event_id = Column(String(100), nullable=True, index=True)
     raw_payload = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -93,6 +98,11 @@ class RecoveryAction(Base):
     retry_count = Column(Integer, default=0)
     rationale = Column(Text, nullable=True)
     outreach_message = Column(Text, nullable=True)
+    # Decision intelligence is explicitly advisory and auditable. It never
+    # overrides strategy safety gates or triggers a debit.
+    recovery_confidence = Column(Float, nullable=True)
+    expected_recovery_amount = Column(Integer, nullable=True)  # paise
+    decision_factors = Column(Text, nullable=True)
 
     # Bounds
     is_bounded = Column(Boolean, default=True)

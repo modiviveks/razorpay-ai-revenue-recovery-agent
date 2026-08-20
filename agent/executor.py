@@ -2,10 +2,19 @@
 
 import time
 import json
+import re
 from sqlalchemy.orm import Session
 from models import RecoveryAction, PaymentEvent, AuditLog, ActionStatus, RecoveryStrategy
 from razorpay_client.client import razorpay_client
 from config import settings
+
+
+def redact_for_audit(value: str | None) -> str | None:
+    """Remove contact details before persisting operational audit evidence."""
+    if value is None:
+        return None
+    value = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", value)
+    return re.sub(r"(?<!\w)\+?\d[\d\s-]{7,}\d(?!\w)", "[REDACTED_PHONE]", value)
 
 def log_audit_step(
     db: Session,
@@ -22,10 +31,10 @@ def log_audit_step(
         action_id=action_id,
         step=step,
         reasoning=reasoning,
-        api_call=api_call,
-        api_response=api_response,
+        api_call=redact_for_audit(api_call),
+        api_response=redact_for_audit(api_response),
         outcome=outcome,
-        error_detail=error_detail
+        error_detail=redact_for_audit(error_detail)
     )
     db.add(log)
     db.commit()

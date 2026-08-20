@@ -36,3 +36,13 @@ def test_bounds_exceeded_strategy():
     )
     assert res.strategy == RecoveryStrategy.NO_ACTION
     assert res.status == ActionStatus.BOUNDS_EXCEEDED
+
+
+def test_high_value_recovery_requires_merchant_approval():
+    res = determine_strategy(
+        failure_class=FailureClass.UPI_TIMEOUT,
+        previous_retries=0,
+        amount_paise=1_000_000,
+    )
+    assert res.status == ActionStatus.PENDING_APPROVAL
+    assert res.strategy == RecoveryStrategy.RETRY_PAYMENT_LINK

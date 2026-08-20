@@ -4,6 +4,7 @@ import json
 import hashlib
 from fastapi import APIRouter, Request, Header, HTTPException, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from database import get_db
 from models import PaymentEvent, RecoveryAction, ActionStatus
 from agent.pipeline import run_recovery_pipeline
@@ -72,6 +73,23 @@ async def handle_razorpay_webhook(
             return {"status": "ignored", "message": "Payment link is not owned by a recovery action."}
         if action.status == ActionStatus.RECOVERED:
             return {"status": "duplicate", "action_id": action.id, "message": "Recovery was already recorded."}
+        paid_amount = payment_link.get("amount_paid", payment_link.get("amount"))
+        paid_currency = payment_link.get("currency")
+        # Payload variants do not always include amount details. When they do,
+        # do not silently attribute a mismatched payment to this recovery.
+        if (isinstance(paid_amount, int) and paid_amount != action.event.amount) or (
+            paid_currency and paid_currency != action.event.currency
+        ):
+            action.status = ActionStatus.RECONCILIATION_REQUIRED
+            db.commit()
+            log_audit_step(
+                db=db,
+                action_id=action.id,
+                step="RECONCILIATION_REQUIRED",
+                reasoning="Paid link details did not match the recovery opportunity; merchant reconciliation is required.",
+                outcome="REVIEW",
+            )
+            return {"status": "reconciliation_required", "action_id": action.id}
 
         action.status = ActionStatus.RECOVERED
         action.event.status = "recovered"
@@ -148,7 +166,14 @@ async def handle_razorpay_webhook(
         raw_payload=json.dumps(safe_payload, separators=(",", ":")),
     )
     db.add(event)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The unique event key also closes the race between duplicate webhook
+        # deliveries arriving on separate request workers.
+        db.rollback()
+        existing = db.query(PaymentEvent).filter(PaymentEvent.webhook_event_id == event_key).first()
+        return {"status": "duplicate", "event_id": existing.id if existing else None}
     db.refresh(event)
 
     action = run_recovery_pipeline(db, event)

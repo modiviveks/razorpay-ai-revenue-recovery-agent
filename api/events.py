@@ -1,14 +1,24 @@
 """Events and audit APIs for dashboard visualization."""
 
-from fastapi import APIRouter, Depends
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db
 from models import PaymentEvent, RecoveryAction, AuditLog, ActionStatus, RecoveryStrategy
+from agent.executor import execute_recovery, log_audit_step
+from config import settings
 
 router = APIRouter(prefix="/api", tags=["API"])
 
-@router.get("/events")
+
+def require_dashboard_key(x_dashboard_key: str = Header(default=None)):
+    """Optionally protect merchant data outside local demos."""
+    if settings.DASHBOARD_API_KEY and x_dashboard_key != settings.DASHBOARD_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid dashboard API key")
+
+@router.get("/events", dependencies=[Depends(require_dashboard_key)])
 def get_events(limit: int = 50, db: Session = Depends(get_db)):
     """Fetches list of failed payment events and their recovery actions."""
     events = (
@@ -38,7 +48,10 @@ def get_events(limit: int = 50, db: Session = Depends(get_db)):
                 "new_payment_link_url": action.new_payment_link_url,
                 "retry_count": action.retry_count,
                 "rationale": action.rationale,
-                "outreach_message": action.outreach_message
+                "outreach_message": action.outreach_message,
+                "recovery_confidence": action.recovery_confidence,
+                "expected_recovery_amount": action.expected_recovery_amount,
+                "decision_factors": json.loads(action.decision_factors or "[]"),
             }
             
         result.append({
@@ -57,7 +70,7 @@ def get_events(limit: int = 50, db: Session = Depends(get_db)):
     return result
 
 
-@router.get("/audit-trail/{action_id}")
+@router.get("/audit-trail/{action_id}", dependencies=[Depends(require_dashboard_key)])
 def get_audit_trail(action_id: int, db: Session = Depends(get_db)):
     """Fetches full audit steps for a specific recovery action."""
     logs = (
@@ -81,7 +94,7 @@ def get_audit_trail(action_id: int, db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/stats")
+@router.get("/stats", dependencies=[Depends(require_dashboard_key)])
 def get_stats(db: Session = Depends(get_db)):
     """Computes high level metrics for dashboard KPI cards."""
     total_failures = db.query(PaymentEvent).count()
@@ -141,4 +154,30 @@ def get_stats(db: Session = Depends(get_db)):
         "successful_recoveries": recovered_actions,
         "recovered_amount_rupees": round(recovered_amount / 100, 2),
         "recovery_rate": recovery_rate,
+        "expected_recovery_amount_rupees": round(
+            (db.query(func.sum(RecoveryAction.expected_recovery_amount)).scalar() or 0) / 100,
+            2,
+        ),
     }
+
+
+@router.post("/actions/{action_id}/approve", dependencies=[Depends(require_dashboard_key)])
+def approve_recovery_action(action_id: int, db: Session = Depends(get_db)):
+    """Execute a high-value action only after explicit merchant approval."""
+    action = db.get(RecoveryAction, action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Recovery action not found")
+    if action.status != ActionStatus.PENDING_APPROVAL:
+        raise HTTPException(status_code=409, detail=f"Action is {action.status.value}, not awaiting approval")
+
+    action.status = ActionStatus.PENDING
+    db.commit()
+    log_audit_step(
+        db=db,
+        action_id=action.id,
+        step="MERCHANT_APPROVED",
+        reasoning="A merchant explicitly approved this high-value recovery action.",
+        outcome="SUCCESS",
+    )
+    execute_recovery(db, action, action.event)
+    return {"status": action.status.value, "action_id": action.id}

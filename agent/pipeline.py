@@ -1,10 +1,13 @@
 """Recovery Pipeline orchestrator: ties classification, strategy, execution and logging together."""
 
+import json
+
 from sqlalchemy.orm import Session
 from models import PaymentEvent, RecoveryAction, ActionStatus, FailureClass
 from agent.classifier import classify_failure
 from agent.strategy import determine_strategy
 from agent.executor import execute_recovery, log_audit_step
+from agent.intelligence import assess_recovery
 
 def run_recovery_pipeline(db: Session, event: PaymentEvent) -> RecoveryAction:
     """Orchestrates the classification, strategy, and execution steps for a payment event."""
@@ -41,6 +44,12 @@ def run_recovery_pipeline(db: Session, event: PaymentEvent) -> RecoveryAction:
         previous_retries=previous_retries,
         amount_paise=event.amount
     )
+    assessment = assess_recovery(
+        failure_class=failure_class,
+        strategy=strategy_res.strategy,
+        amount_paise=event.amount,
+        previous_retries=previous_retries,
+    )
     
     # Create the RecoveryAction record
     action = RecoveryAction(
@@ -51,7 +60,10 @@ def run_recovery_pipeline(db: Session, event: PaymentEvent) -> RecoveryAction:
         retry_count=previous_retries + 1,
         rationale=classification_rationale if failure_class != FailureClass.UNKNOWN else strategy_res.rationale,
         is_bounded=strategy_res.is_bounded,
-        max_retries_allowed=strategy_res.max_retries
+        max_retries_allowed=strategy_res.max_retries,
+        recovery_confidence=assessment.confidence,
+        expected_recovery_amount=assessment.expected_recovery_amount,
+        decision_factors=json.dumps(assessment.factors),
     )
     db.add(action)
     db.commit()
@@ -75,7 +87,8 @@ def run_recovery_pipeline(db: Session, event: PaymentEvent) -> RecoveryAction:
     if action.status == ActionStatus.PENDING:
         execute_recovery(db, action, event)
     else:
-        # If status is BOUNDS_EXCEEDED or SKIPPED, log skip audit log
+        # Approval, bounded and skipped actions remain observable without an
+        # external call being made from the webhook request.
         log_audit_step(
             db=db,
             action_id=action.id,

@@ -102,6 +102,19 @@ def determine_strategy(
             rationale=f"Bounds exceeded: Current retries ({previous_retries}) reached or exceeded maximum limit of {max_retries}."
         )
 
+    # Large recovery amounts are legitimate opportunities, but should not be
+    # sent automatically without merchant approval.
+    if amount_paise >= settings.REQUIRE_APPROVAL_OVER_PAISE:
+        return StrategyResult(
+            strategy=rule["strategy"],
+            status=ActionStatus.PENDING_APPROVAL,
+            max_retries=max_retries,
+            is_bounded=True,
+            rationale=(
+                f"Merchant approval required: amount (₹{amount_paise/100:.2f}) meets the "
+                f"high-value threshold. Proposed action: {rule['strategy'].value}."
+            ),
+        )
     return StrategyResult(
         strategy=rule["strategy"],
         status=ActionStatus.PENDING,

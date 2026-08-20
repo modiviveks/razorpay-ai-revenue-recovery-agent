@@ -15,6 +15,9 @@ This project was built for **Track 03 — AI Revenue Recovery** for the Razorpay
 - Webhook deliveries are idempotent using Razorpay's event ID header (or a payload hash fallback), preventing duplicate recovery links.
 - The dashboard's **Amount Linked** and **Link Generation Rate** measure recovery opportunities, not collected revenue. Recovered-revenue reporting requires a verified payment-success webhook and reconciliation to the recovery action.
 - Outreach is generated as a draft only. No SMS, email, or WhatsApp message is sent by this service.
+- High-value actions require explicit merchant approval before a payment link is created. Configure the threshold using `REQUIRE_APPROVAL_OVER_PAISE`.
+- Decision confidence is a transparent, rule-based prioritisation signal. It never overrides safety gates or triggers a debit.
+- Audit evidence redacts email addresses and phone numbers before persistence. Set `DASHBOARD_API_KEY` when exposing dashboard APIs outside a local demo.
 
 ## Key Features
 
@@ -86,7 +89,6 @@ razorpay-recovery-agent/
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
-   pip install "setuptools<70" # Required for older razorpay package compatibility
    ```
 
 ### 3. Configuration
@@ -99,6 +101,14 @@ OPENAI_API_KEY=sk-xxxxxx
 MOCK_RAZORPAY=true  # Set to false to use actual Razorpay Test Mode keys
 ```
 *Note: If `MOCK_RAZORPAY=true` (default), the agent will operate fully using fake/mock payment links without hitting the live Razorpay servers.*
+
+### Recovery intelligence and approval
+
+The agent exposes a deterministic recovery-confidence score and expected recovery value for each eligible action. The score uses the failure class, recovery strategy and prior attempts; it deliberately does not use customer PII or allow an LLM to decide whether money actions are taken.
+
+To approve a high-value action after merchant review, call `POST /api/actions/{action_id}/approve`. When `DASHBOARD_API_KEY` is configured, pass it as the `X-Dashboard-Key` header to all `/api` endpoints.
+
+For production deployment, use a transactional database and migrations, move webhook execution to an outbox/worker, and integrate consented delivery plus holdout-group measurement. Subscription recovery should consume Razorpay subscription lifecycle events (`subscription.pending` and `subscription.halted`) rather than treating recurring failures like one-time checkout failures.
 
 ---
 
