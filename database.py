@@ -1,56 +1,44 @@
-"""SQLite database setup via SQLAlchemy."""
+"""SQLAlchemy database setup."""
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
-
 from config import settings
 
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False},  # SQLite needs this for FastAPI
-    echo=False,
-)
-
+connect_args = {"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(settings.DATABASE_URL, connect_args=connect_args, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-
 def get_db():
-    """FastAPI dependency — yields a DB session."""
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-
 def init_db():
-    """Create tables and apply additive SQLite upgrades used by the demo."""
     from models import PaymentEvent, RecoveryAction, AuditLog, PromiseToPay  # noqa: F401
     Base.metadata.create_all(bind=engine)
-    # ``create_all`` does not add columns to an existing SQLite file. Keep the
-    # self-contained demo upgradeable without asking judges to delete data.
     if engine.dialect.name == "sqlite":
         _add_missing_sqlite_columns()
 
-
 def _add_missing_sqlite_columns():
-    required_columns = {
-        "risk_type": "VARCHAR(40) NOT NULL DEFAULT 'PAYMENT_FAILURE'",
-        "source_reference": "VARCHAR(100)",
-        "due_at": "DATETIME",
+    upgrades = {
+        "payment_events": {
+            "risk_type": "VARCHAR(40) NOT NULL DEFAULT 'PAYMENT_FAILURE'",
+            "source_reference": "VARCHAR(100)",
+            "due_at": "DATETIME",
+        },
+        "recovery_actions": {
+            "ai_advice": "TEXT",
+            "ai_advice_source": "VARCHAR(30)",
+            "model_version": "VARCHAR(50)",
+            "experiment_variant": "VARCHAR(20)",
+        },
     }
-    existing_columns = {column["name"] for column in inspect(engine).get_columns("payment_events")}
     with engine.begin() as connection:
-        for name, definition in required_columns.items():
-            if name not in existing_columns:
-                connection.execute(text(f"ALTER TABLE payment_events ADD COLUMN {name} {definition}"))
-    action_columns = {
-        "ai_advice": "TEXT",
-        "ai_advice_source": "VARCHAR(30)",
-    }
-    existing_action_columns = {column["name"] for column in inspect(engine).get_columns("recovery_actions")}
-    with engine.begin() as connection:
-        for name, definition in action_columns.items():
-            if name not in existing_action_columns:
-                connection.execute(text(f"ALTER TABLE recovery_actions ADD COLUMN {name} {definition}"))
+        for table, columns in upgrades.items():
+            existing = {c["name"] for c in inspect(engine).get_columns(table)}
+            for name, definition in columns.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
