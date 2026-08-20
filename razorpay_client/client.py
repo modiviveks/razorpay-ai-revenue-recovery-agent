@@ -9,7 +9,9 @@ class MockPaymentLink:
     """Mock Razorpay payment link entity."""
     def __init__(self, data):
         self.id = data.get("id") or f"plink_{''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=14))}"
-        self.short_url = f"https://rzp.io/i/{self.id}"
+        # A local hosted checkout makes mock-mode demos clickable. Real mode
+        # continues to return the Razorpay URL supplied by the SDK.
+        self.short_url = f"/demo/payment-links/{self.id}"
         self.status = "created"
         self.amount = data.get("amount")
         self.currency = data.get("currency")
@@ -37,7 +39,7 @@ class MockPaymentLinkModule:
         return {
             "id": plink_id,
             "status": "created",
-            "short_url": f"https://rzp.io/i/{plink_id}",
+            "short_url": f"/demo/payment-links/{plink_id}",
             "amount": 50000,
             "currency": "INR"
         }
