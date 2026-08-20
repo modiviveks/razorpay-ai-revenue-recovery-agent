@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from agent.executor import log_audit_step
 from config import settings
 from database import get_db
-from models import ActionStatus, RecoveryAction
+from models import ActionStatus, AuditLog, PaymentEvent, PromiseToPay, RecoveryAction
 import os
 
 router = APIRouter(tags=["Dashboard"])
@@ -77,3 +77,16 @@ def pay_mock_payment_link(payment_link_id: str, db: Session = Depends(get_db)):
         outcome="SUCCESS",
     )
     return {"status": "recovered", "message": "Mock payment verified and attributed to recovery."}
+
+
+@router.post("/demo/reset")
+def reset_mock_demo(db: Session = Depends(get_db)):
+    """Reset only local mock demo data; unavailable whenever real mode is enabled."""
+    if not settings.MOCK_RAZORPAY:
+        raise HTTPException(status_code=404, detail="Demo reset is unavailable in real mode")
+    db.query(AuditLog).delete()
+    db.query(PromiseToPay).delete()
+    db.query(RecoveryAction).delete()
+    db.query(PaymentEvent).delete()
+    db.commit()
+    return {"status": "reset", "message": "Mock demo data cleared."}

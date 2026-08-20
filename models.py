@@ -49,6 +49,7 @@ class ActionStatus(str, enum.Enum):
     BOUNDS_EXCEEDED = "BOUNDS_EXCEEDED"
     PENDING_APPROVAL = "PENDING_APPROVAL"
     RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
+    PROMISE_ACTIVE = "PROMISE_ACTIVE"
 
 
 # ─── Models ──────────────────────────────────────────────────────────────────

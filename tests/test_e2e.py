@@ -184,3 +184,35 @@ def test_receivable_promise_to_pay_is_recorded_and_can_be_escalated(client):
     broken = client.post(f"/api/promises/{promise.json()['id']}/mark-broken")
     assert broken.status_code == 200
     assert broken.json()["next_step"] == "MERCHANT_COLLECTIONS_REVIEW"
+
+
+def test_active_promise_to_pay_stops_a_repeat_receivables_chaser(client):
+    payload = get_receivable_overdue_payload()
+    invoice_id = f"inv_promise_stop_{uuid.uuid4().hex}"
+    payload["payload"]["receivable"]["entity"]["id"] = invoice_id
+    first = client.post(
+        "/webhook/razorpay",
+        json=payload,
+        headers={"X-Test-Simulator": "true", "X-Razorpay-Event-Id": f"evt_promise_first_{uuid.uuid4().hex}"},
+    )
+    assert first.status_code == 200
+    first_event = next(item for item in client.get("/api/events").json() if item["payment_id"] == invoice_id)
+    promise = client.post(
+        f"/api/actions/{first_event['action']['id']}/promise-to-pay",
+        json={"promised_for": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()},
+    )
+    assert promise.status_code == 200
+
+    repeat = client.post(
+        "/webhook/razorpay",
+        json=payload,
+        headers={"X-Test-Simulator": "true", "X-Razorpay-Event-Id": f"evt_promise_repeat_{uuid.uuid4().hex}"},
+    )
+    assert repeat.status_code == 200
+    assert repeat.json()["action_status"] == "PROMISE_ACTIVE"
+    assert repeat.json()["new_payment_link"] is None
+
+    outcomes = client.get("/api/outcomes")
+    assert outcomes.status_code == 200
+    receivables = next(row for row in outcomes.json() if row["risk_type"] == "RECEIVABLE_OVERDUE")
+    assert receivables["stopped"] >= 1

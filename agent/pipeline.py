@@ -1,9 +1,13 @@
 """Recovery Pipeline orchestrator: ties classification, strategy, execution and logging together."""
 
 import json
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
-from models import PaymentEvent, RecoveryAction, ActionStatus, FailureClass
+from models import (
+    PaymentEvent, RecoveryAction, ActionStatus, FailureClass, RecoveryStrategy,
+    PromiseToPay, PromiseStatus,
+)
 from agent.classifier import classify_failure
 from agent.strategy import determine_strategy
 from agent.executor import execute_recovery, log_audit_step
@@ -46,6 +50,25 @@ def run_recovery_pipeline(
     else:
         retry_query = retry_query.filter(PaymentEvent.payment_id == event.payment_id)
     previous_retries = retry_query.count()
+
+    # An active B2B promise-to-pay is a hard stopping rule. We still record the
+    # new overdue signal, but do not issue another collection link before the
+    # customer commitment expires or is explicitly marked broken.
+    active_promise = None
+    if failure_class == FailureClass.RECEIVABLE_OVERDUE:
+        active_promise = (
+            db.query(PromiseToPay)
+            .join(RecoveryAction, PromiseToPay.action_id == RecoveryAction.id)
+            .join(PaymentEvent, RecoveryAction.event_id == PaymentEvent.id)
+            .filter(
+                PaymentEvent.risk_type == "RECEIVABLE_OVERDUE",
+                PaymentEvent.source_reference == event.source_reference,
+                PromiseToPay.status == PromiseStatus.OPEN,
+                PromiseToPay.promised_for > datetime.now(timezone.utc),
+            )
+            .order_by(PromiseToPay.promised_for.desc())
+            .first()
+        )
         
     # 2. Determine Strategy & Enforce Bounds
     strategy_res = determine_strategy(
@@ -53,6 +76,18 @@ def run_recovery_pipeline(
         previous_retries=previous_retries,
         amount_paise=event.amount
     )
+    if active_promise:
+        from agent.strategy import StrategyResult
+        strategy_res = StrategyResult(
+            strategy=RecoveryStrategy.NO_ACTION,
+            status=ActionStatus.PROMISE_ACTIVE,
+            max_retries=0,
+            is_bounded=True,
+            rationale=(
+                f"Automatic collections paused: open promise-to-pay #{active_promise.id} "
+                f"is due on {active_promise.promised_for.isoformat()}."
+            ),
+        )
     assessment = assess_recovery(
         failure_class=failure_class,
         strategy=strategy_res.strategy,

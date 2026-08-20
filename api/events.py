@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import case, func
 from database import get_db
 from models import (
     PaymentEvent, RecoveryAction, AuditLog, ActionStatus, RecoveryStrategy,
@@ -158,6 +158,7 @@ def get_stats(db: Session = Depends(get_db)):
         recovery_rate = round((recovered_actions / total_failures) * 100, 1)
 
     return {
+        "runtime_mode": "MOCK" if settings.MOCK_RAZORPAY else "LIVE",
         "total_failures": total_failures,
         "total_failed_amount_rupees": round(total_failed_amount / 100, 2),
         "recovery_links_created": recovery_links_created,
@@ -171,6 +172,45 @@ def get_stats(db: Session = Depends(get_db)):
             2,
         ),
     }
+
+
+@router.get("/outcomes", dependencies=[Depends(require_dashboard_key)])
+def get_outcomes_by_signal(db: Session = Depends(get_db)):
+    """Batch impact by revenue-risk source, without overstating non-recovered value."""
+    rows = (
+        db.query(
+            PaymentEvent.risk_type.label("risk_type"),
+            func.count(PaymentEvent.id).label("events"),
+            func.coalesce(func.sum(PaymentEvent.amount), 0).label("at_risk"),
+            func.coalesce(
+                func.sum(case((RecoveryAction.status == ActionStatus.RECOVERED, PaymentEvent.amount), else_=0)),
+                0,
+            ).label("recovered"),
+            func.coalesce(
+                func.sum(case((RecoveryAction.new_payment_link_id.is_not(None), 1), else_=0)),
+                0,
+            ).label("interventions"),
+            func.coalesce(
+                func.sum(case((RecoveryAction.status.in_([ActionStatus.SKIPPED, ActionStatus.BOUNDS_EXCEEDED, ActionStatus.PROMISE_ACTIVE]), 1), else_=0)),
+                0,
+            ).label("stopped"),
+        )
+        .outerjoin(RecoveryAction, RecoveryAction.event_id == PaymentEvent.id)
+        .group_by(PaymentEvent.risk_type)
+        .order_by(PaymentEvent.risk_type)
+        .all()
+    )
+    return [
+        {
+            "risk_type": row.risk_type,
+            "events": row.events,
+            "at_risk_rupees": round(row.at_risk / 100, 2),
+            "interventions": row.interventions,
+            "recovered_rupees": round(row.recovered / 100, 2),
+            "stopped": row.stopped,
+        }
+        for row in rows
+    ]
 
 
 @router.post("/actions/{action_id}/approve", dependencies=[Depends(require_dashboard_key)])
@@ -203,6 +243,8 @@ def record_promise_to_pay(action_id: int, request_data: PromiseToPayRequest, db:
         raise HTTPException(status_code=404, detail="Recovery action not found")
     if action.event.risk_type != "RECEIVABLE_OVERDUE":
         raise HTTPException(status_code=409, detail="Promises to pay are only supported for overdue receivables")
+    if action.status == ActionStatus.RECOVERED:
+        raise HTTPException(status_code=409, detail="A promise cannot be recorded after this receivable is recovered")
     promised_for = request_data.promised_for
     if promised_for.tzinfo is None:
         promised_for = promised_for.replace(tzinfo=timezone.utc)

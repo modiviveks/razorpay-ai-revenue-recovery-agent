@@ -20,6 +20,7 @@ This project was built for **Track 03 — AI Revenue Recovery** for the Razorpay
 - High-value actions require explicit merchant approval before a payment link is created. Configure the threshold using `REQUIRE_APPROVAL_OVER_PAISE`.
 - Decision confidence is a transparent, rule-based prioritisation signal. It never overrides safety gates or triggers a debit.
 - Audit evidence redacts email addresses and phone numbers before persistence. Set `DASHBOARD_API_KEY` when exposing dashboard APIs outside a local demo.
+- The dashboard visibly labels Mock Mode and marks its recovery metrics as simulated. Only a real signed Razorpay payment-success webhook should be presented as recovered revenue in production.
 
 ## Key Features
 
@@ -124,6 +125,8 @@ For production deployment, use a transactional database and migrations, move web
 | `receivable.overdue` | Time-bound collection link and promise-to-pay record | Promise pauses chasers; broken promise goes to merchant review |
 
 Record a promise using `POST /api/actions/{action_id}/promise-to-pay` with `promised_for` as an ISO timestamp. A broken promise is escalated through `POST /api/promises/{promise_id}/mark-broken`.
+
+While an open promise exists for the same receivable, repeat overdue signals are recorded but no new collection link is created. This is an enforced stopping rule, not only an audit message.
 
 ---
 

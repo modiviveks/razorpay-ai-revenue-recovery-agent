@@ -20,6 +20,7 @@
                 <span class="font-bold text-xl tracking-tight">Razorpay AI Revenue Recovery Agent</span>
             </div>
             <div class="flex items-center space-x-4">
+                <span id="mode-badge" class="bg-amber-500/20 text-amber-200 border border-amber-500/30 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider">Mock Mode · No Real Money</span>
                 <span class="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5">
                     <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span> Agent Active
                 </span>
@@ -33,7 +34,7 @@
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex items-center justify-between">
                 <div>
-                    <p class="text-sm font-medium text-gray-500 uppercase">Total Failures</p>
+                    <p class="text-sm font-medium text-gray-500 uppercase">Revenue-Risk Events</p>
                     <p id="stat-total-failures" class="text-3xl font-bold text-gray-900 mt-1">0</p>
                 </div>
                 <div class="p-3 rounded-lg bg-rose-50 text-rose-500">
@@ -53,7 +54,7 @@
 
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex items-center justify-between">
                 <div>
-                    <p class="text-sm font-medium text-gray-500 uppercase">Amount Recovered</p>
+                    <p id="recovered-label" class="text-sm font-medium text-gray-500 uppercase">Recovered Amount</p>
                     <p id="stat-recovered-amount" class="text-3xl font-bold text-emerald-600 mt-1">₹0.00</p>
                 </div>
                 <div class="p-3 rounded-lg bg-emerald-50 text-emerald-500">
@@ -71,6 +72,22 @@
                 </div>
             </div>
         </div>
+
+        <section class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-8">
+            <div class="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                    <h2 class="font-bold text-lg text-gray-900">Batch Outcome by Revenue-Risk Signal</h2>
+                    <p id="outcome-caption" class="text-sm text-gray-500 mt-0.5">Measured recovery and stopping-rule outcomes.</p>
+                </div>
+                <button onclick="resetDemo()" id="reset-demo" class="text-xs font-semibold text-rose-700 border border-rose-200 bg-rose-50 hover:bg-rose-100 px-3 py-2 rounded-lg">Reset mock demo</button>
+            </div>
+            <div class="overflow-x-auto"><table class="w-full text-left border-collapse">
+                <thead><tr class="bg-gray-50 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-gray-100">
+                    <th class="px-6 py-3">Signal</th><th class="px-6 py-3 text-right">At Risk</th><th class="px-6 py-3 text-right">Interventions</th><th class="px-6 py-3 text-right">Recovered</th><th class="px-6 py-3 text-right">Stopped</th>
+                </tr></thead>
+                <tbody id="outcomes-table-body" class="divide-y divide-gray-100"><tr><td colspan="5" class="px-6 py-5 text-center text-sm text-gray-400">No batch outcomes yet.</td></tr></tbody>
+            </table></div>
+        </section>
 
         <!-- Grid Layout: Table & Audit Trail -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -162,9 +179,45 @@
                 document.getElementById('stat-amount-risk').innerText = '₹' + data.total_failed_amount_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2});
                 document.getElementById('stat-recovered-amount').innerText = '₹' + data.recovered_amount_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2});
                 document.getElementById('stat-recovery-rate').innerText = data.recovery_rate + '%';
+                const mock = data.runtime_mode === 'MOCK';
+                document.getElementById('mode-badge').innerText = mock ? 'Mock Mode · No Real Money' : 'Live Mode';
+                document.getElementById('recovered-label').innerText = mock ? 'Simulated Recovered Amount' : 'Recovered Amount';
+                document.getElementById('outcome-caption').innerText = mock
+                    ? 'Simulated payment confirmations. No real money is collected in mock mode.'
+                    : 'Payment outcomes attributed after confirmed recovery.';
+                document.getElementById('reset-demo').classList.toggle('hidden', !mock);
             } catch (err) {
                 console.error("Error fetching stats:", err);
             }
+        }
+
+        async function fetchOutcomes() {
+            try {
+                const response = await fetch('/api/outcomes');
+                const outcomes = await response.json();
+                const tbody = document.getElementById('outcomes-table-body');
+                if (!outcomes.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-5 text-center text-sm text-gray-400">No batch outcomes yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = outcomes.map(o => `<tr class="text-sm">
+                    <td class="px-6 py-3 font-semibold text-indigo-700">${o.risk_type}</td>
+                    <td class="px-6 py-3 text-right">₹${o.at_risk_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                    <td class="px-6 py-3 text-right">${o.interventions}</td>
+                    <td class="px-6 py-3 text-right font-semibold text-emerald-700">₹${o.recovered_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                    <td class="px-6 py-3 text-right font-semibold text-amber-700">${o.stopped}</td>
+                </tr>`).join('');
+            } catch (err) { console.error('Error fetching outcomes:', err); }
+        }
+
+        async function resetDemo() {
+            if (!confirm('Clear all local mock demo data? This cannot affect Razorpay or real payments.')) return;
+            const response = await fetch('/demo/reset', {method: 'POST'});
+            if (!response.ok) { alert('Could not reset demo.'); return; }
+            currentSelectedActionId = null;
+            document.getElementById('audit-trail-container').classList.add('hidden');
+            document.getElementById('audit-trail-placeholder').classList.remove('hidden');
+            refreshData();
         }
 
         async function fetchEvents() {
@@ -357,6 +410,7 @@
         function refreshData() {
             fetchStats();
             fetchEvents();
+            fetchOutcomes();
             if (currentSelectedActionId) {
                 // Refresh the active audit trail if visible
                 const activeInspect = document.querySelector(`button[onclick*="viewAuditTrail(${currentSelectedActionId}"]`);

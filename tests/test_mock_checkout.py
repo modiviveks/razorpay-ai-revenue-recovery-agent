@@ -19,3 +19,10 @@ def test_mock_link_is_clickable_and_marks_recovery():
         paid = client.post(f"{link}/pay")
         assert paid.status_code == 200
         assert paid.json()["status"] == "recovered"
+
+
+def test_mock_demo_reset_is_available_only_for_mock_mode():
+    with TestClient(app) as client:
+        response = client.post("/demo/reset")
+        assert response.status_code == 200
+        assert response.json()["status"] == "reset"
