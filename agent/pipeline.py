@@ -1,0 +1,215 @@
+"""Recovery Pipeline orchestrator: ties classification, strategy, execution and logging together."""
+
+import json
+from datetime import datetime, timezone
+
+from sqlalchemy.orm import Session
+from models import (
+    PaymentEvent, RecoveryAction, ActionStatus, FailureClass, RecoveryStrategy,
+    PromiseToPay, PromiseStatus,
+)
+from agent.classifier import classify_failure
+from agent.strategy import determine_strategy
+from agent.executor import execute_recovery, log_audit_step
+from agent.intelligence import assess_recovery
+from agent.advisor import generate_advice
+from agent.next_best_action import rank_candidates, build_decision_explanation
+from config import settings
+
+def run_recovery_pipeline(
+    db: Session,
+    event: PaymentEvent,
+    forced_failure_class: FailureClass | None = None,
+    forced_rationale: str | None = None,
+) -> RecoveryAction:
+    """Orchestrates the classification, strategy, and execution steps for a payment event."""
+    
+    # 1. Classify failure
+    if forced_failure_class:
+        failure_class = forced_failure_class
+        classification_rationale = forced_rationale or "Classified from a normalised revenue-risk signal."
+    else:
+        failure_class, classification_rationale = classify_failure(
+            error_code=event.error_code,
+            error_description=event.error_description,
+            error_source=event.error_source,
+            error_step=event.error_step,
+            error_reason=event.error_reason,
+            method=event.method,
+        )
+    
+    # Count only actual attempts of the same failure class. Skipped and blocked records
+    # must not consume a retry quota.
+    retry_query = (
+        db.query(RecoveryAction)
+        .join(PaymentEvent)
+        .filter(
+            RecoveryAction.failure_class == failure_class,
+            RecoveryAction.status.in_([ActionStatus.SUCCESS, ActionStatus.FAILED, ActionStatus.EXECUTING]),
+        )
+    )
+    if event.order_id:
+        retry_query = retry_query.filter(PaymentEvent.order_id == event.order_id)
+    else:
+        retry_query = retry_query.filter(PaymentEvent.payment_id == event.payment_id)
+    previous_retries = retry_query.count()
+
+    # An active B2B promise-to-pay is a hard stopping rule. We still record the
+    # new overdue signal, but do not issue another collection link before the
+    # customer commitment expires or is explicitly marked broken.
+    active_promise = None
+    if failure_class == FailureClass.RECEIVABLE_OVERDUE:
+        active_promise = (
+            db.query(PromiseToPay)
+            .join(RecoveryAction, PromiseToPay.action_id == RecoveryAction.id)
+            .join(PaymentEvent, RecoveryAction.event_id == PaymentEvent.id)
+            .filter(
+                PaymentEvent.risk_type == "RECEIVABLE_OVERDUE",
+                PaymentEvent.source_reference == event.source_reference,
+                PromiseToPay.status == PromiseStatus.OPEN,
+                PromiseToPay.promised_for > datetime.now(timezone.utc),
+            )
+            .order_by(PromiseToPay.promised_for.desc())
+            .first()
+        )
+        
+    # 2. Rank only policy-allowed candidates (including explicit NO_ACTION)
+    candidates = rank_candidates(
+        failure_class=failure_class,
+        amount_paise=event.amount,
+        method=event.method,
+        retry_count=previous_retries,
+        risk_type=event.risk_type,
+        merchant_segment=event.merchant_segment or "standard",
+    )
+    selected_candidate = candidates[0] if candidates else None
+
+    # 3. Determine Strategy & Enforce Bounds
+    strategy_res = determine_strategy(
+        failure_class=failure_class,
+        previous_retries=previous_retries,
+        amount_paise=event.amount,
+        proposed_strategy=selected_candidate.strategy if selected_candidate else None,
+    )
+    if active_promise:
+        from agent.strategy import StrategyResult
+        strategy_res = StrategyResult(
+            strategy=RecoveryStrategy.NO_ACTION,
+            status=ActionStatus.PROMISE_ACTIVE,
+            max_retries=0,
+            is_bounded=True,
+            rationale=(
+                f"Automatic collections paused: open promise-to-pay #{active_promise.id} "
+                f"is due on {active_promise.promised_for.isoformat()}."
+            ),
+        )
+
+    # 4. Build transparent next-best-action decision explanation
+    is_high_val = event.amount >= settings.REQUIRE_APPROVAL_OVER_PAISE
+    explanation = build_decision_explanation(
+        ranked_candidates=candidates,
+        failure_class=failure_class,
+        amount_paise=event.amount,
+        retry_count=previous_retries,
+        is_bounded=strategy_res.is_bounded,
+        max_retries=strategy_res.max_retries,
+        is_high_value=is_high_val,
+        active_promise_id=active_promise.id if active_promise else None,
+    )
+
+    assessment = assess_recovery(
+        failure_class=failure_class,
+        strategy=strategy_res.strategy,
+        amount_paise=event.amount,
+        previous_retries=previous_retries,
+    )
+    model_probability = selected_candidate.probability if selected_candidate else assessment.confidence
+    advice = generate_advice(
+        failure_class=failure_class,
+        strategy=strategy_res.strategy,
+        status=strategy_res.status,
+        confidence=assessment.confidence,
+        previous_retries=previous_retries,
+    )
+    
+    # Create the RecoveryAction record
+    action = RecoveryAction(
+        event_id=event.id,
+        failure_class=failure_class,
+        strategy=strategy_res.strategy,
+        status=strategy_res.status,
+        retry_count=previous_retries + 1,
+        rationale=classification_rationale if failure_class != FailureClass.UNKNOWN else strategy_res.rationale,
+        is_bounded=strategy_res.is_bounded,
+        max_retries_allowed=strategy_res.max_retries,
+        recovery_confidence=assessment.confidence,
+        expected_recovery_amount=selected_candidate.expected_value if selected_candidate else assessment.expected_recovery_amount,
+        decision_factors=json.dumps({
+            "opportunity_score_paise": selected_candidate.score if selected_candidate else 0,
+            "expected_recovery_value_paise": selected_candidate.expected_value if selected_candidate else 0,
+            "intervention_cost_paise": selected_candidate.cost if selected_candidate else 0,
+            "friction_penalty_paise": selected_candidate.friction_penalty if selected_candidate else 0,
+            "why_selected": explanation.why_selected,
+            "why_rejected": explanation.why_rejected,
+            "policy_constraints": explanation.policy_constraints,
+            "legacy_factors": assessment.factors,
+        }),
+        model_version=selected_candidate.model_version if selected_candidate else "fallback-priors-v2",
+        model_probability=model_probability,
+        model_features=json.dumps(selected_candidate.features if selected_candidate else {}),
+        candidate_scores=json.dumps([
+            {
+                "strategy": candidate.strategy.value,
+                "probability": candidate.probability,
+                "expected_recovery_value_paise": candidate.expected_value,
+                "intervention_cost_paise": candidate.cost,
+                "friction_penalty_paise": candidate.friction_penalty,
+                "net_opportunity_score_paise": candidate.score,
+                "selected": candidate == selected_candidate,
+            }
+            for candidate in candidates
+        ]),
+        intervention_cost=selected_candidate.cost if selected_candidate else 0,
+        ai_advice=advice.summary,
+        ai_advice_source=advice.source,
+    )
+    db.add(action)
+    db.commit()
+    db.refresh(action)
+
+    # 5. Log Strategy Decision Audit Step
+    log_audit_step(
+        db=db,
+        action_id=action.id,
+        step="CLASSIFY_AND_STRATEGIZE",
+        reasoning=(
+            f"Classified failure as {failure_class.value}. Selected action: {strategy_res.strategy.value}. "
+            f"Net opportunity score: ₹{(selected_candidate.score if selected_candidate else 0)/100:.2f}. "
+            f"Explanation: {explanation.why_selected} "
+            f"Previous attempts: {previous_retries}/{strategy_res.max_retries}. Model probability: {model_probability:.1%}."
+        ),
+        outcome="SUCCESS"
+    )
+    log_audit_step(
+        db=db,
+        action_id=action.id,
+        step="AI_ADVISOR",
+        reasoning=f"{advice.source}: {advice.summary}",
+        outcome="ADVISORY",
+    )
+
+    # 4. Execute Action if Pending
+    if action.status == ActionStatus.PENDING:
+        execute_recovery(db, action, event)
+    else:
+        # Approval, bounded and skipped actions remain observable without an
+        # external call being made from the webhook request.
+        log_audit_step(
+            db=db,
+            action_id=action.id,
+            step="EXECUTION_SKIPPED",
+            reasoning=f"Execution skipped because action status is {action.status.value}.",
+            outcome="SKIPPED"
+        )
+        
+    return action

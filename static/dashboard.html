@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Razorpay AI Revenue Recovery Agent — Enterprise Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        code, pre, .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .funnel-arrow {
+            position: relative;
+        }
+        .funnel-arrow::after {
+            content: '';
+            position: absolute;
+            right: -12px;
+            top: 50%;
+            transform: translateY(-50%);
+            border-top: 10px solid transparent;
+            border-bottom: 10px solid transparent;
+            border-left: 12px solid #e2e8f0;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 antialiased">
+    <!-- Top Navigation Bar -->
+    <nav class="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-7xl mx-auto px-6 py-3.5 flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="h-9 w-9 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-sm font-bold text-lg">
+                    <i class="fa-solid fa-shield-heart text-emerald-400"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-base tracking-tight text-white">Razorpay AI Revenue Recovery Agent</span>
+                        <span class="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-semibold px-2 py-0.5 rounded">v2.0 Buildathon</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400">Autonomous revenue recovery with deterministic safety, opportunity scoring & human gates</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2.5">
+                <button onclick="openCalibrationModal()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5">
+                    <i class="fa-solid fa-chart-simple text-cyan-400"></i> Model Calibration
+                </button>
+                <button onclick="openApprovalsModal()" id="btn-approvals-badge" class="text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-lg transition font-semibold flex items-center gap-1.5">
+                    <i class="fa-solid fa-user-check text-amber-400"></i> Approvals Queue <span id="pending-count-badge" class="bg-amber-500 text-slate-900 text-[10px] px-1.5 py-0.2 rounded-full font-bold">0</span>
+                </button>
+                <span id="mode-badge" class="bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-1 rounded-lg text-xs font-semibold uppercase tracking-wider">Mock Mode</span>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        <!-- Interactive Simulator & Control Center -->
+        <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-indigo-600"></i> Interactive Recovery Control & Testing Hub
+                    </h2>
+                    <p class="text-xs text-slate-500 mt-0.5">Inject webhook failure scenarios, test negative-EV decisions, or run synthetic 10,000-event A/B benchmarks</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <select id="sim-scenario" class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="upi_timeout">UPI Timeout (pay_upi_...)</option>
+                        <option value="card_expired">Card Expired (pay_card_...)</option>
+                        <option value="insufficient_funds">Insufficient Funds (pay_funds_...)</option>
+                        <option value="user_cancelled">User Cancelled (pay_canc_...)</option>
+                        <option value="bank_decline">Bank Decline (pay_bank_...)</option>
+                        <option value="subscription_failed">Subscription Mandate Fail</option>
+                        <option value="below_minimum">Below Minimum / Negative EV (₹0.50)</option>
+                        <option value="high_value_hold">High-Value Approval Gate (₹5,000+)</option>
+                        <option value="checkout_abandoned">Checkout Abandoned</option>
+                        <option value="receivable_overdue">Receivable Overdue (B2B)</option>
+                        <option value="all">⚡ Run All Test Scenarios</option>
+                    </select>
+
+                    <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-lg">
+                        <input type="checkbox" id="sim-mark-recovered" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+                        <span>Auto-Pay (Mark Recovered)</span>
+                    </label>
+
+                    <button onclick="triggerSimulation()" id="btn-trigger-sim" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3.5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5">
+                        <i class="fa-solid fa-bolt"></i> Trigger Failure
+                    </button>
+
+                    <button onclick="runExperimentSimulation()" id="btn-run-exp" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3.5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5">
+                        <i class="fa-solid fa-flask-vial"></i> Synthetic A/B Impact (10k)
+                    </button>
+                </div>
+            </div>
+            <div id="sim-notification" class="hidden mt-3 text-xs p-3 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-900 font-medium flex items-center justify-between">
+                <span id="sim-notification-text"></span>
+                <button onclick="document.getElementById('sim-notification').classList.add('hidden')" class="text-indigo-400 hover:text-indigo-700">✕</button>
+            </div>
+        </section>
+
+        <!-- Payment Network Degradation Monitor -->
+        <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-3 border-b border-slate-100 pb-3">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-tower-broadcast text-slate-700 text-sm"></i>
+                    <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wider">Payment Network Degradation Detector</h3>
+                </div>
+                <span class="text-[11px] text-slate-500">Sliding Window (100 Events) • Baseline Comparison</span>
+            </div>
+            <div id="degradation-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <!-- Dynamically populated -->
+            </div>
+        </section>
+
+        <!-- KPI Metric Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Revenue At Risk</p>
+                    <p id="stat-amount-risk" class="text-2xl font-bold text-slate-900 mt-1">₹0.00</p>
+                    <p id="stat-total-failures-sub" class="text-[11px] text-slate-400 mt-0.5">0 total failure events</p>
+                </div>
+                <div class="p-3 rounded-xl bg-rose-50 text-rose-500">
+                    <i class="fa-solid fa-triangle-exclamation text-xl"></i>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Interventions Sent</p>
+                    <p id="stat-links-created" class="text-2xl font-bold text-indigo-600 mt-1">0</p>
+                    <p id="stat-link-rate" class="text-[11px] text-slate-400 mt-0.5">0.0% intervention rate</p>
+                </div>
+                <div class="p-3 rounded-xl bg-indigo-50 text-indigo-500">
+                    <i class="fa-solid fa-paper-plane text-xl"></i>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Settled Recovered</p>
+                    <p id="stat-recovered-amount" class="text-2xl font-bold text-emerald-600 mt-1">₹0.00</p>
+                    <p id="stat-recovered-count" class="text-[11px] text-slate-400 mt-0.5">0 verified settlements</p>
+                </div>
+                <div class="p-3 rounded-xl bg-emerald-50 text-emerald-500">
+                    <i class="fa-solid fa-circle-check text-xl"></i>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Verified Recovery Rate</p>
+                    <p id="stat-recovery-rate" class="text-2xl font-bold text-slate-900 mt-1">0.0%</p>
+                    <p class="text-[11px] text-emerald-600 mt-0.5 font-medium flex items-center gap-1">
+                        <i class="fa-solid fa-arrow-trend-up"></i> Value weighted
+                    </p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-100 text-slate-700">
+                    <i class="fa-solid fa-chart-line text-xl"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Executive Recovery Funnel -->
+        <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div class="flex flex-wrap items-center justify-between border-b border-slate-100 pb-4 mb-5 gap-2">
+                <div>
+                    <h2 class="font-bold text-base text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-filter text-indigo-600"></i> Executive Recovery Funnel
+                    </h2>
+                    <p class="text-xs text-slate-500 mt-0.5">End-to-end transparent accounting from initial ingestion to verified bank settlement</p>
+                </div>
+                <div class="flex items-center gap-3 text-xs">
+                    <span class="text-slate-500">Overall Conversion: <strong id="funnel-conversion-rate" class="text-indigo-600 font-bold">0.0%</strong></span>
+                    <span class="text-slate-300">|</span>
+                    <span class="text-slate-500">Value Recovery: <strong id="funnel-value-rate" class="text-emerald-600 font-bold">0.0%</strong></span>
+                </div>
+            </div>
+
+            <!-- 4 Stage Blocks -->
+            <div id="funnel-stages-container" class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
+                <!-- Injected dynamically -->
+            </div>
+
+            <!-- Drop-off Accounting Drawer -->
+            <div class="bg-slate-50 rounded-lg p-4 border border-slate-200/80">
+                <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <i class="fa-solid fa-arrow-right-from-bracket text-slate-400"></i> Funnel Drop-off & Stopping Rules Accounting
+                </h4>
+                <div id="funnel-dropoffs" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+                    <!-- Injected dynamically -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Merchant Segment Performance -->
+        <section class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                    <h2 class="font-bold text-base text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-chart-pie text-indigo-600"></i> Merchant Segment Analytics
+                    </h2>
+                    <p class="text-xs text-slate-500 mt-0.5">Granular performance by merchant tier (Standard, Growth, Enterprise)</p>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs">
+                    <thead>
+                        <tr class="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200">
+                            <th class="px-6 py-3">Merchant Segment</th>
+                            <th class="px-6 py-3 text-right">Failure Events</th>
+                            <th class="px-6 py-3 text-right">At Risk (₹)</th>
+                            <th class="px-6 py-3 text-right">Interventions</th>
+                            <th class="px-6 py-3 text-right">Recovered (₹)</th>
+                            <th class="px-6 py-3 text-right">Recovery Rate</th>
+                            <th class="px-6 py-3 text-right">Avg Ticket</th>
+                            <th class="px-6 py-3">Top Failure Class</th>
+                            <th class="px-6 py-3">Optimal Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="segments-table-body" class="divide-y divide-slate-100">
+                        <tr><td colspan="9" class="px-6 py-4 text-center text-slate-400">Loading segment metrics...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Main Workspace: Events Log & Explainable Audit Drawer -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Left 2 Cols: Events Table -->
+            <section class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h2 class="font-bold text-base text-slate-900">Recent Revenue-Risk Events</h2>
+                        <p class="text-xs text-slate-500 mt-0.5">Live transaction failure stream and autonomous agent decisions</p>
+                    </div>
+                    <button onclick="resetDemo()" class="text-xs font-semibold text-rose-700 border border-rose-200 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 rounded-lg transition">
+                        <i class="fa-solid fa-trash-can mr-1"></i> Reset Mock State
+                    </button>
+                </div>
+                <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="sticky top-0 bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 z-10">
+                            <tr>
+                                <th class="px-5 py-3">Event / Customer</th>
+                                <th class="px-5 py-3">Failure Classification</th>
+                                <th class="px-5 py-3">Next-Best-Action</th>
+                                <th class="px-5 py-3">Status</th>
+                                <th class="px-5 py-3 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="events-table-body" class="divide-y divide-slate-100">
+                            <tr><td colspan="5" class="px-5 py-8 text-center text-slate-400">Loading events...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Right 1 Col: Explainable Next-Best-Action & Audit Inspector -->
+            <section id="audit-section-panel" class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex flex-col h-[650px] overflow-hidden">
+                <div class="border-b border-slate-100 pb-3 flex items-center justify-between">
+                    <div>
+                        <h3 class="font-bold text-sm text-slate-900 flex items-center gap-2">
+                            <i class="fa-solid fa-scale-balanced text-indigo-600"></i> Explainable Decision & Audit
+                        </h3>
+                        <p class="text-[11px] text-slate-500">Deterministic policy, opportunity score & SHA-256 chain</p>
+                    </div>
+                    <button onclick="verifyCurrentAuditChain()" id="btn-verify-hash" class="hidden text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-2.5 py-1 rounded transition border border-slate-300">
+                        <i class="fa-solid fa-link text-indigo-600"></i> Verify Hash
+                    </button>
+                </div>
+
+                <div id="hash-verify-result" class="hidden my-2 p-2 rounded text-[11px] font-semibold flex items-center gap-1.5"></div>
+
+                <!-- Empty State -->
+                <div id="audit-placeholder" class="flex-grow flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                    <i class="fa-solid fa-magnifying-glass text-3xl text-slate-300 mb-2"></i>
+                    <p class="text-xs font-medium text-slate-600">No Action Selected</p>
+                    <p class="text-[11px] text-slate-400 mt-1">Click "Inspect" on any event to see why an action was chosen, why others were rejected, and the cryptographic audit trail.</p>
+                </div>
+
+                <!-- Active Audit View -->
+                <div id="audit-container" class="hidden flex-grow overflow-y-auto pr-1 space-y-4 pt-3 text-xs">
+                    <!-- Summary Card -->
+                    <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                        <div class="flex items-center justify-between mb-1">
+                            <span id="audit-payment-id" class="font-mono font-bold text-slate-800 text-[11px]"></span>
+                            <span id="audit-badge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"></span>
+                        </div>
+                        <div class="text-[11px] text-slate-600">
+                            <strong>Recommended Action:</strong> <span id="audit-strategy" class="font-semibold text-indigo-700"></span>
+                        </div>
+                    </div>
+
+                    <!-- Explainability Breakdown Box -->
+                    <div id="explainability-box" class="bg-indigo-50/70 rounded-lg p-3 border border-indigo-100 space-y-2">
+                        <h4 class="font-bold text-[11px] text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-lightbulb text-amber-500"></i> Decision Transparency & Opportunity Score
+                        </h4>
+                        <div class="grid grid-cols-3 gap-2 text-[10px] bg-white p-2 rounded border border-indigo-100">
+                            <div>
+                                <span class="text-slate-400 block">Expected Value</span>
+                                <strong id="exp-ev" class="text-slate-800 font-mono">₹0.00</strong>
+                            </div>
+                            <div>
+                                <span class="text-slate-400 block">Cost + Friction</span>
+                                <strong id="exp-cost" class="text-rose-600 font-mono">₹0.00</strong>
+                            </div>
+                            <div>
+                                <span class="text-slate-400 block">Net Opportunity</span>
+                                <strong id="exp-score" class="text-emerald-700 font-mono">₹0.00</strong>
+                            </div>
+                        </div>
+                        <div class="text-[11px] text-indigo-900" id="exp-why-selected"></div>
+                        <div id="exp-rejected-container" class="space-y-1 pt-1 border-t border-indigo-100/80">
+                            <span class="text-[10px] font-bold text-slate-500 uppercase">Alternative Candidates:</span>
+                            <ul id="exp-why-rejected-list" class="space-y-1 text-[10px] text-slate-600 list-disc pl-3.5"></ul>
+                        </div>
+                    </div>
+
+                    <!-- Outreach Message Preview -->
+                    <div id="outreach-preview-box" class="hidden bg-emerald-50 rounded-lg p-3 border border-emerald-100">
+                        <h4 class="font-bold text-[11px] text-emerald-950 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                            <i class="fa-solid fa-envelope-open-text text-emerald-600"></i> Customer Outreach Message
+                        </h4>
+                        <p id="outreach-text" class="text-[11px] text-emerald-900 font-mono bg-white p-2 rounded border border-emerald-200"></p>
+                    </div>
+
+                    <!-- Audit Timeline Steps -->
+                    <div>
+                        <h4 class="font-bold text-[11px] text-slate-700 uppercase tracking-wider mb-2">Cryptographic Audit Trail</h4>
+                        <div id="audit-steps-timeline" class="space-y-3"></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- High-Value Human Approvals Queue Modal -->
+    <div id="approvals-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 max-h-[85vh] flex flex-col">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+                <div>
+                    <h3 class="font-bold text-base text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-user-shield text-amber-600"></i> High-Value Recovery Approvals Queue
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-0.5">Actions exceeding ₹5,000 requiring merchant sign-off before dispatch</p>
+                </div>
+                <button onclick="document.getElementById('approvals-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-2 text-lg">✕</button>
+            </div>
+            <div id="approvals-list-container" class="flex-grow overflow-y-auto space-y-3 pr-1 text-xs">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Calibration & Evaluation Modal -->
+    <div id="calibration-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 max-h-[85vh] flex flex-col">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+                <div>
+                    <h3 class="font-bold text-base text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-chart-line text-indigo-600"></i> Recovery Propensity Model Calibration
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-0.5">10-Decile predicted vs observed recovery probability calibration report</p>
+                </div>
+                <button onclick="document.getElementById('calibration-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-2 text-lg">✕</button>
+            </div>
+            <div id="calibration-content" class="flex-grow overflow-y-auto space-y-4 pr-1 text-xs">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Synthetic A/B Impact Experiment Modal -->
+    <div id="experiment-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+                <div>
+                    <h3 class="font-bold text-base text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-flask-vial text-emerald-600"></i> Synthetic A/B Impact Benchmark (10,000 Events)
+                    </h3>
+                    <p id="exp-meta" class="text-xs text-slate-500 mt-0.5">Rigorous statistical significance testing with 95% Confidence Intervals</p>
+                </div>
+                <button onclick="document.getElementById('experiment-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-2 text-lg">✕</button>
+            </div>
+            <div id="experiment-content" class="space-y-4 text-xs">
+                <!-- Injected dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        let currentSelectedActionId = null;
+        window.eventsList = [];
+
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const d = await res.json();
+                document.getElementById('stat-amount-risk').innerText = `₹${d.total_failed_amount_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+                document.getElementById('stat-total-failures-sub').innerText = `${d.total_failures} total failure events`;
+                document.getElementById('stat-links-created').innerText = d.recovery_links_created;
+                document.getElementById('stat-link-rate').innerText = `${d.link_generation_rate}% intervention rate`;
+                document.getElementById('stat-recovered-amount').innerText = `₹${d.recovered_amount_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+                document.getElementById('stat-recovered-count').innerText = `${d.successful_recoveries} verified settlements`;
+                document.getElementById('stat-recovery-rate').innerText = `${d.recovery_rate}%`;
+                document.getElementById('mode-badge').innerText = `${d.runtime_mode} Mode`;
+            } catch (err) {
+                console.error('Error fetching stats:', err);
+            }
+        }
+
+        async function fetchFunnel() {
+            try {
+                const res = await fetch('/api/analytics/funnel');
+                const d = await res.json();
+                document.getElementById('funnel-conversion-rate').innerText = `${d.overall_conversion_rate}%`;
+                document.getElementById('funnel-value-rate').innerText = `${d.value_recovery_rate}%`;
+
+                const stagesContainer = document.getElementById('funnel-stages-container');
+                stagesContainer.innerHTML = d.stages.map((st, i) => {
+                    const isLast = i === d.stages.length - 1;
+                    const bgClass = i === 0 ? 'bg-slate-100 border-slate-200' :
+                                    i === 1 ? 'bg-indigo-50/60 border-indigo-100' :
+                                    i === 2 ? 'bg-blue-50/60 border-blue-100' : 'bg-emerald-50 border-emerald-200';
+                    const textClass = i === 3 ? 'text-emerald-700' : 'text-slate-900';
+                    return `
+                        <div class="p-4 rounded-xl border ${bgClass} flex flex-col justify-between">
+                            <div>
+                                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">${st.name}</span>
+                                <p class="text-xl font-bold ${textClass} mt-1 font-mono">${st.count} <span class="text-xs font-normal text-slate-500">events</span></p>
+                                <p class="text-xs font-semibold text-slate-700 mt-0.5">₹${st.amount_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</p>
+                            </div>
+                            <div class="mt-3 pt-2 border-t border-slate-200/50 flex justify-between items-center text-[10px] text-slate-500">
+                                <span>Yield: <strong>${st.conversion_from_total}%</strong></span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                const dropoffsContainer = document.getElementById('funnel-dropoffs');
+                dropoffsContainer.innerHTML = `
+                    <div class="bg-white p-2.5 rounded border border-slate-200">
+                        <span class="text-slate-400 block text-[10px]">Exceeded Retries</span>
+                        <strong class="text-slate-800 text-xs">${d.drop_offs.bounds_and_retries_exceeded}</strong>
+                    </div>
+                    <div class="bg-white p-2.5 rounded border border-slate-200">
+                        <span class="text-slate-400 block text-[10px]">Awaiting Approval</span>
+                        <strong class="text-amber-600 text-xs">${d.drop_offs.high_value_awaiting_approval}</strong>
+                    </div>
+                    <div class="bg-white p-2.5 rounded border border-slate-200">
+                        <span class="text-slate-400 block text-[10px]">Active Promise Paused</span>
+                        <strong class="text-indigo-600 text-xs">${d.drop_offs.promise_to_pay_active_paused}</strong>
+                    </div>
+                    <div class="bg-white p-2.5 rounded border border-slate-200">
+                        <span class="text-slate-400 block text-[10px]">Negative-EV Skipped</span>
+                        <strong class="text-slate-600 text-xs">${d.drop_offs.negative_ev_no_action_skipped}</strong>
+                    </div>
+                    <div class="bg-white p-2.5 rounded border border-slate-200">
+                        <span class="text-slate-400 block text-[10px]">Unconverted / In-Flight</span>
+                        <strong class="text-slate-500 text-xs">${d.drop_offs.customer_pending_or_unconverted}</strong>
+                    </div>
+                `;
+            } catch (err) {
+                console.error('Error fetching funnel:', err);
+            }
+        }
+
+        async function fetchSegments() {
+            try {
+                const res = await fetch('/api/analytics/segments');
+                const segments = await res.json();
+                const tbody = document.getElementById('segments-table-body');
+                if (!segments.length) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-4 text-center text-slate-400">No segment data.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = segments.map(s => `
+                    <tr class="hover:bg-slate-50/60 transition">
+                        <td class="px-6 py-3.5 font-bold text-slate-900 flex items-center gap-2">
+                            <span class="h-2 w-2 rounded-full ${s.segment === 'Enterprise' ? 'bg-purple-500' : s.segment === 'Growth' ? 'bg-indigo-500' : 'bg-slate-400'}"></span>
+                            ${s.segment}
+                        </td>
+                        <td class="px-6 py-3.5 text-right font-mono">${s.events_count}</td>
+                        <td class="px-6 py-3.5 text-right font-mono">₹${s.at_risk_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                        <td class="px-6 py-3.5 text-right font-mono">${s.interventions_count}</td>
+                        <td class="px-6 py-3.5 text-right font-mono font-semibold text-emerald-700">₹${s.recovered_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                        <td class="px-6 py-3.5 text-right font-bold ${s.recovery_rate > 0 ? 'text-indigo-600' : 'text-slate-400'}">${s.recovery_rate}%</td>
+                        <td class="px-6 py-3.5 text-right font-mono text-slate-600">₹${s.average_ticket_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                        <td class="px-6 py-3.5"><span class="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[10px] font-medium">${s.top_failure_class}</span></td>
+                        <td class="px-6 py-3.5"><span class="px-2 py-0.5 rounded bg-indigo-50 border border-indigo-100 text-indigo-700 font-semibold text-[10px]">${s.most_effective_strategy}</span></td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Error fetching segments:', err);
+            }
+        }
+
+        async function fetchNetworkDegradation() {
+            try {
+                const res = await fetch('/api/network/degradation-status');
+                const data = await res.json();
+                const container = document.getElementById('degradation-grid');
+                const methods = Object.values(data.methods || {});
+                if (!methods.length) {
+                    container.innerHTML = '<div class="col-span-4 text-center py-4 text-slate-400 text-xs">Awaiting transaction stream...</div>';
+                    return;
+                }
+                container.innerHTML = methods.map(m => {
+                    const isDegraded = m.is_degraded;
+                    const badgeBg = isDegraded ? (m.severity === 'CRITICAL' ? 'bg-rose-100 text-rose-800 border-rose-200' : 'bg-amber-100 text-amber-800 border-amber-200') : 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                    const icon = isDegraded ? 'fa-triangle-exclamation text-rose-500' : 'fa-circle-check text-emerald-500';
+                    return `
+                        <div class="p-3.5 rounded-xl border ${isDegraded ? 'bg-rose-50/40 border-rose-200' : 'bg-slate-50 border-slate-200'} flex flex-col justify-between text-xs">
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="font-bold text-slate-900 uppercase flex items-center gap-1.5">
+                                        <i class="fa-solid ${icon}"></i> ${m.method}
+                                    </span>
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-bold border ${badgeBg}">${m.severity}</span>
+                                </div>
+                                <div class="space-y-1 text-[11px] text-slate-600">
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">Current Success:</span>
+                                        <strong class="font-mono">${(m.current_success_rate * 100).toFixed(1)}%</strong>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">Baseline Rate:</span>
+                                        <span class="font-mono">${(m.baseline_success_rate * 100).toFixed(1)}%</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-2 pt-2 border-t border-slate-200/60 text-[10px] text-slate-500">
+                                ${isDegraded ? `<span class="text-rose-700 font-semibold">${m.root_cause_hypothesis}</span>` : 'Network switch latencies normal.'}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Error fetching degradation status:', err);
+            }
+        }
+
+        async function fetchPendingApprovalsCount() {
+            try {
+                const res = await fetch('/api/actions/pending-approvals');
+                const items = await res.json();
+                document.getElementById('pending-count-badge').innerText = items.length;
+            } catch (err) {}
+        }
+
+        async function openApprovalsModal() {
+            const modal = document.getElementById('approvals-modal');
+            const container = document.getElementById('approvals-list-container');
+            modal.classList.remove('hidden');
+            container.innerHTML = '<div class="text-center py-6 text-slate-400"><i class="fa-solid fa-spinner animate-spin"></i> Loading pending approvals...</div>';
+            try {
+                const res = await fetch('/api/actions/pending-approvals');
+                const items = await res.json();
+                if (!items.length) {
+                    container.innerHTML = '<div class="text-center py-8 text-slate-400"><i class="fa-solid fa-check-circle text-2xl text-emerald-500 mb-2"></i><p>No high-value actions awaiting approval.</p></div>';
+                    return;
+                }
+                container.innerHTML = items.map(act => `
+                    <div class="p-4 rounded-xl border border-amber-200 bg-amber-50/50 space-y-2.5">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <span class="font-bold text-slate-900">${act.customer_name}</span>
+                                <span class="text-[11px] text-slate-500 font-mono ml-2">₹${act.amount_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                            </div>
+                            <span class="px-2 py-0.5 rounded bg-amber-200 text-amber-900 font-bold text-[10px]">PENDING SIGN-OFF</span>
+                        </div>
+                        <div class="text-[11px] text-slate-700 bg-white p-2.5 rounded border border-amber-100">
+                            <strong>Proposed Strategy:</strong> ${act.proposed_strategy} • <strong>Failure:</strong> ${act.failure_class}
+                            <div class="text-slate-500 mt-1">${act.rationale}</div>
+                        </div>
+                        <div class="flex items-center justify-end gap-2 pt-1">
+                            <button onclick="rejectApprovalAction(${act.action_id})" class="px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs transition">
+                                Decline Action
+                            </button>
+                            <button onclick="approveAction(${act.action_id})" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition shadow-sm">
+                                Approve & Dispatch Link
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                container.innerHTML = `<div class="text-rose-500 py-4">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function approveAction(actionId) {
+            const reason = prompt('Enter merchant approval note:', 'Verified legitimate high-ticket customer');
+            if (!reason) return;
+            try {
+                const res = await fetch(`/api/actions/${actionId}/approve`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({reason})
+                });
+                if (res.ok) {
+                    alert('Action approved and recovery link generated.');
+                    openApprovalsModal();
+                    refreshData();
+                } else {
+                    const err = await res.json();
+                    alert(`Approval failed: ${err.detail}`);
+                }
+            } catch (err) {
+                alert(`Error: ${err.message}`);
+            }
+        }
+
+        async function rejectApprovalAction(actionId) {
+            const reason = prompt('Enter merchant rejection reason:', 'Suspected duplicate / merchant opted out');
+            if (!reason) return;
+            try {
+                const res = await fetch(`/api/actions/${actionId}/reject`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({reason})
+                });
+                if (res.ok) {
+                    alert('Action successfully rejected and cancelled.');
+                    openApprovalsModal();
+                    refreshData();
+                }
+            } catch (err) {
+                alert(`Error: ${err.message}`);
+            }
+        }
+
+        async function openCalibrationModal() {
+            const modal = document.getElementById('calibration-modal');
+            const content = document.getElementById('calibration-content');
+            modal.classList.remove('hidden');
+            content.innerHTML = '<div class="text-center py-6 text-slate-400"><i class="fa-solid fa-spinner animate-spin"></i> Loading calibration metrics...</div>';
+            try {
+                const res = await fetch('/api/model/metrics');
+                const data = await res.json();
+                const metrics = data.metrics || {};
+                const calib = metrics.calibration || [];
+
+                content.innerHTML = `
+                    <div class="grid grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                        <div><span class="text-slate-400 block text-[10px]">Model Version</span><strong class="font-mono text-slate-800">${data.model_version || 'v2'}</strong></div>
+                        <div><span class="text-slate-400 block text-[10px]">ROC-AUC</span><strong class="font-mono text-indigo-600">${metrics.roc_auc || 0.70}</strong></div>
+                        <div><span class="text-slate-400 block text-[10px]">Brier Score</span><strong class="font-mono text-emerald-600">${metrics.brier_score || 0.22}</strong></div>
+                        <div><span class="text-slate-400 block text-[10px]">Sample Size</span><strong class="font-mono text-slate-800">${data.training_sample_count || 8000}</strong></div>
+                    </div>
+                    <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                                    <th class="px-4 py-2.5">Probability Decile</th>
+                                    <th class="px-4 py-2.5 text-right">Samples</th>
+                                    <th class="px-4 py-2.5 text-right">Mean Predicted</th>
+                                    <th class="px-4 py-2.5 text-right">Observed Recovery</th>
+                                    <th class="px-4 py-2.5 text-right">Calibration Gap</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                ${calib.map(b => `
+                                    <tr class="hover:bg-slate-50/60">
+                                        <td class="px-4 py-2 font-mono font-semibold text-slate-800">${b.bucket}</td>
+                                        <td class="px-4 py-2 text-right font-mono text-slate-500">${b.samples}</td>
+                                        <td class="px-4 py-2 text-right font-mono text-indigo-700">${(b.mean_predicted_probability * 100).toFixed(1)}%</td>
+                                        <td class="px-4 py-2 text-right font-mono text-emerald-700 font-semibold">${(b.observed_recovery_rate * 100).toFixed(1)}%</td>
+                                        <td class="px-4 py-2 text-right font-mono text-slate-500">${(b.calibration_gap * 100).toFixed(1)}%</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } catch (err) {
+                content.innerHTML = `<div class="text-rose-500 py-4">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function fetchEvents() {
+            try {
+                const res = await fetch('/api/events');
+                const events = await res.json();
+                window.eventsList = events;
+                const tbody = document.getElementById('events-table-body');
+                if (!events.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="px-5 py-8 text-center text-slate-400">No failure events yet. Use the Simulator toolbar above!</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = events.map(e => {
+                    const act = e.action || {};
+                    const status = act.status || 'SKIPPED';
+                    let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+                    if (status === 'SUCCESS') badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                    else if (status === 'RECOVERED') badgeClass = 'bg-teal-100 text-teal-800 border-teal-200';
+                    else if (status === 'PENDING_APPROVAL') badgeClass = 'bg-amber-100 text-amber-800 border-amber-200';
+                    else if (status === 'BOUNDS_EXCEEDED') badgeClass = 'bg-rose-100 text-rose-800 border-rose-200';
+
+                    const inspectBtn = act.id ? `
+                        <button onclick="viewAuditTrail(${act.id}, '${e.payment_id}', '${status}', '${act.strategy}')" class="p-1.5 text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50 rounded-lg transition text-xs font-semibold inline-flex items-center gap-1">
+                            <i class="fa-solid fa-receipt"></i> Inspect
+                        </button>
+                    ` : '<span class="text-slate-400 text-xs">No Action</span>';
+
+                    const link = act.new_payment_link_url ? `
+                        <a href="${act.new_payment_link_url}" target="_blank" class="text-indigo-600 hover:underline block mt-0.5 text-[11px]">
+                            <i class="fa-solid fa-arrow-up-right-from-square text-[9px]"></i> Payment Link
+                        </a>
+                    ` : '';
+
+                    return `
+                        <tr id="event-row-${act.id || e.id}" class="hover:bg-slate-50/60 transition cursor-pointer" onclick="viewAuditTrail(${act.id || 0}, '${e.payment_id}', '${status}', '${act.strategy || 'NO_ACTION'}')">
+                            <td class="px-5 py-3.5">
+                                <div class="font-bold text-slate-900">${e.customer_name || 'Anonymous'}</div>
+                                <div class="text-[11px] text-slate-500 font-mono">${e.payment_id}</div>
+                                <div class="text-[11px] font-semibold text-slate-700 mt-0.5">₹${(e.amount / 100).toFixed(2)} • ${(e.method || 'UNKNOWN').toUpperCase()}</div>
+                            </td>
+                            <td class="px-5 py-3.5">
+                                <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium text-[11px] border border-slate-200">${act.failure_class || 'UNKNOWN'}</span>
+                                <div class="text-[11px] text-slate-400 mt-1 max-w-[170px] truncate" title="${e.error_description || ''}">${e.error_description || ''}</div>
+                            </td>
+                            <td class="px-5 py-3.5">
+                                <div class="font-bold text-slate-800">${act.strategy || 'NO_ACTION'}</div>
+                                <div class="text-[10px] text-slate-500 mt-0.5 max-w-[180px] line-clamp-2">${act.rationale || ''}</div>
+                            </td>
+                            <td class="px-5 py-3.5">
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${badgeClass}">${status}</span>
+                                ${link}
+                            </td>
+                            <td class="px-5 py-3.5 text-right">${inspectBtn}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Error fetching events:', err);
+            }
+        }
+
+        async function viewAuditTrail(actionId, paymentId, status, strategy) {
+            currentSelectedActionId = actionId;
+
+            // Visual row highlight
+            document.querySelectorAll('#events-table-body tr').forEach(r => r.classList.remove('bg-indigo-50/80', 'border-indigo-200'));
+            const activeRow = document.getElementById(`event-row-${actionId}`);
+            if (activeRow) activeRow.classList.add('bg-indigo-50/80');
+
+            document.getElementById('audit-placeholder').classList.add('hidden');
+            const container = document.getElementById('audit-container');
+            container.classList.remove('hidden');
+            document.getElementById('btn-verify-hash').classList.remove('hidden');
+            document.getElementById('hash-verify-result').classList.add('hidden');
+
+            // Scroll the audit panel into view smoothly if on smaller screens or scrolled down
+            const auditSection = document.getElementById('audit-section-panel');
+            if (auditSection) {
+                auditSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            document.getElementById('audit-payment-id').innerText = paymentId;
+            document.getElementById('audit-strategy').innerText = strategy;
+            const badge = document.getElementById('audit-badge');
+            badge.innerText = status;
+            badge.className = "px-2 py-0.5 rounded text-[10px] font-bold uppercase " + (
+                status === 'SUCCESS' ? 'bg-emerald-100 text-emerald-800' :
+                status === 'RECOVERED' ? 'bg-teal-100 text-teal-800' :
+                status === 'PENDING_APPROVAL' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-800'
+            );
+
+            // Populate Explainability Details
+            const curEvt = window.eventsList ? window.eventsList.find(e => (e.action && e.action.id === actionId) || e.payment_id === paymentId) : null;
+            if (curEvt && curEvt.action) {
+                const factors = curEvt.action.decision_factors || {};
+                const ev = (factors.expected_recovery_value_paise || 0) / 100.0;
+                const cost = ((factors.intervention_cost_paise || 0) + (factors.friction_penalty_paise || 0)) / 100.0;
+                const score = (factors.opportunity_score_paise || 0) / 100.0;
+
+                document.getElementById('exp-ev').innerText = `₹${ev.toFixed(2)}`;
+                document.getElementById('exp-cost').innerText = `₹${cost.toFixed(2)}`;
+                document.getElementById('exp-score').innerText = `₹${score.toFixed(2)}`;
+                document.getElementById('exp-why-selected').innerText = factors.why_selected || curEvt.action.rationale;
+
+                const rejections = factors.why_rejected || {};
+                const rejectionsList = document.getElementById('exp-why-rejected-list');
+                const rejKeys = Object.keys(rejections);
+                if (rejKeys.length) {
+                    rejectionsList.innerHTML = rejKeys.map(k => `<li><strong>${k}:</strong> ${rejections[k]}</li>`).join('');
+                    document.getElementById('exp-rejected-container').classList.remove('hidden');
+                } else {
+                    document.getElementById('exp-rejected-container').classList.add('hidden');
+                }
+
+                const outreach = curEvt.action.outreach_message;
+                const outreachBox = document.getElementById('outreach-preview-box');
+                if (outreach) {
+                    outreachBox.classList.remove('hidden');
+                    document.getElementById('outreach-text').innerText = outreach;
+                } else {
+                    outreachBox.classList.add('hidden');
+                }
+            }
+
+            // Fetch Audit Trail Steps
+            const timeline = document.getElementById('audit-steps-timeline');
+            if (!actionId) {
+                timeline.innerHTML = '<div class="text-slate-400 py-3 text-center">No action steps recorded for this event.</div>';
+                return;
+            }
+            timeline.innerHTML = '<div class="text-center py-4 text-slate-400"><i class="fa-solid fa-spinner animate-spin"></i> Loading audit steps...</div>';
+            try {
+                const res = await fetch(`/api/audit-trail/${actionId}`);
+                const steps = await res.json();
+                if (!steps || !steps.length) {
+                    timeline.innerHTML = '<div class="text-slate-400 py-3 text-center">No audit trail steps found.</div>';
+                    return;
+                }
+                timeline.innerHTML = steps.map((s, idx) => `
+                    <div class="flex items-start">
+                        <div class="flex-shrink-0 flex items-center justify-center h-6 w-6 rounded-full bg-slate-100 border border-slate-200 z-10 text-[10px]">
+                            <i class="fa-solid fa-circle-dot text-indigo-500"></i>
+                        </div>
+                        <div class="flex-grow pl-3 min-w-0 pb-3 ${idx === steps.length - 1 ? '' : 'border-l border-slate-200 ml-3'}">
+                            <div class="flex justify-between items-center">
+                                <h5 class="font-bold text-slate-800 text-[11px] uppercase">${s.step}</h5>
+                                <span class="text-[9px] text-slate-400 font-mono">${new Date(s.created_at).toLocaleTimeString()}</span>
+                            </div>
+                            <p class="text-[11px] text-slate-600 mt-0.5 leading-relaxed">${s.reasoning || ''}</p>
+                            <div class="text-[9px] text-slate-400 font-mono mt-1 break-all">SHA-256: ${s.current_hash ? s.current_hash.substring(0, 16) + '...' : ''}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                timeline.innerHTML = `<div class="text-rose-500">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function verifyCurrentAuditChain() {
+            if (!currentSelectedActionId) return;
+            const resBox = document.getElementById('hash-verify-result');
+            resBox.classList.remove('hidden');
+            resBox.innerHTML = 'Verifying cryptographic hashes...';
+            try {
+                const res = await fetch(`/api/audit-trail/${currentSelectedActionId}/verify`);
+                const data = await res.json();
+                if (data.status === 'VALID') {
+                    resBox.className = 'my-2 p-2 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200';
+                    resBox.innerHTML = `<i class="fa-solid fa-shield-check text-emerald-600"></i> Cryptographic chain intact (${data.entries} blocks verified)`;
+                } else {
+                    resBox.className = 'my-2 p-2 rounded text-[11px] font-semibold bg-rose-50 text-rose-800 border border-rose-200';
+                    resBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-rose-600"></i> Hash chain broken at log ID ${data.invalid_log_id}`;
+                }
+            } catch (err) {
+                resBox.innerHTML = `Verification error: ${err.message}`;
+            }
+        }
+
+        async function triggerSimulation() {
+            const scenario = document.getElementById('sim-scenario').value;
+            const autoPay = document.getElementById('sim-mark-recovered').checked;
+            const btn = document.getElementById('btn-trigger-sim');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> Running...';
+            try {
+                const res = await fetch('/demo/simulate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({scenario, mark_recovered: autoPay})
+                });
+                const data = await res.json();
+                const notif = document.getElementById('sim-notification');
+                const notifText = document.getElementById('sim-notification-text');
+                notif.classList.remove('hidden');
+                notifText.innerText = `Simulation executed: ${data.message || 'Scenario dispatched successfully'}.`;
+                refreshData();
+            } catch (err) {
+                alert(`Simulation error: ${err.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Trigger Failure';
+            }
+        }
+
+        async function runExperimentSimulation() {
+            const modal = document.getElementById('experiment-modal');
+            const content = document.getElementById('experiment-content');
+            modal.classList.remove('hidden');
+            content.innerHTML = '<div class="text-center py-10 text-slate-400"><i class="fa-solid fa-spinner animate-spin text-2xl text-emerald-600 mb-2"></i><p>Running 10,000-event synthetic A/B simulation and computing statistical significance...</p></div>';
+            try {
+                const res = await fetch('/api/experiments/simulate?sample_size=10000', {method: 'POST'});
+                const data = await res.json();
+                const stat = data.statistical_inference || {};
+                const ci = stat.confidence_interval_95 || [0, 0];
+
+                content.innerHTML = `
+                    <div class="bg-amber-50 p-3 rounded-lg border border-amber-200 text-amber-900 text-[11px] mb-3">
+                        <strong>⚠️ Notice:</strong> ${data.notice}
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                        <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                            <span class="text-slate-400 block text-[10px]">Control Recovery</span>
+                            <strong class="text-slate-800 font-mono text-sm">${(data.control_recovery_rate * 100).toFixed(1)}%</strong>
+                        </div>
+                        <div class="p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+                            <span class="text-emerald-700 block text-[10px]">Treatment Recovery</span>
+                            <strong class="text-emerald-700 font-mono text-sm">${(data.treatment_recovery_rate * 100).toFixed(1)}%</strong>
+                        </div>
+                        <div class="p-3 rounded-lg bg-indigo-50 border border-indigo-200">
+                            <span class="text-indigo-700 block text-[10px]">Incremental Lift</span>
+                            <strong class="text-indigo-700 font-mono text-sm">+${(stat.absolute_lift * 100).toFixed(1)}%</strong>
+                        </div>
+                        <div class="p-3 rounded-lg bg-purple-50 border border-purple-200">
+                            <span class="text-purple-700 block text-[10px]">Simulated ROI</span>
+                            <strong class="text-purple-700 font-mono text-sm">${data.recovery_roi}x</strong>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-4 rounded-xl border border-slate-200 space-y-2">
+                        <h4 class="font-bold text-slate-900 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-square-poll-vertical text-indigo-600"></i> Statistical Inference & Significance
+                        </h4>
+                        <div class="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded text-[11px]">
+                            <div><span class="text-slate-400">95% Confidence Interval:</span> <strong class="font-mono text-slate-800">[${(ci[0]*100).toFixed(1)}%, ${(ci[1]*100).toFixed(1)}%]</strong></div>
+                            <div><span class="text-slate-400">p-value:</span> <strong class="font-mono text-emerald-700">${stat.p_value < 0.0001 ? '< 0.0001' : stat.p_value.toFixed(4)}</strong></div>
+                            <div><span class="text-slate-400">Z-Score:</span> <strong class="font-mono text-indigo-600">${stat.z_score}</strong></div>
+                        </div>
+                        <p class="text-[11px] text-slate-600 bg-slate-50 p-2.5 rounded">${stat.conclusion}</p>
+                    </div>
+                `;
+            } catch (err) {
+                content.innerHTML = `<div class="text-rose-500 py-4">Simulation failed: ${err.message}</div>`;
+            }
+        }
+
+        async function resetDemo() {
+            if (!confirm('Reset local demo transactions and reset all state?')) return;
+            await fetch('/demo/reset', {method: 'POST'});
+            currentSelectedActionId = null;
+            document.getElementById('audit-container').classList.add('hidden');
+            document.getElementById('audit-placeholder').classList.remove('hidden');
+            refreshData();
+        }
+
+        function refreshData() {
+            fetchStats();
+            fetchFunnel();
+            fetchSegments();
+            fetchNetworkDegradation();
+            fetchPendingApprovalsCount();
+            fetchEvents();
+            if (currentSelectedActionId) {
+                const activeInspect = document.querySelector(`button[onclick*="viewAuditTrail(${currentSelectedActionId}"]`);
+                if (activeInspect) activeInspect.click();
+            }
+        }
+
+        setInterval(refreshData, 6000);
+        refreshData();
+    </script>
+</body>
+</html>
