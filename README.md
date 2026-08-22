@@ -1,6 +1,22 @@
-# Razorpay AI Revenue Recovery Agent
+# ⚡ RazorRevive — Autonomous AI Revenue Recovery Agent
 
-An autonomous, bounded, closed-loop payment and receivables recovery engine built for the **Razorpay Buildathon**. It diagnoses transaction failures, predicts recovery propensity, optimizes recovery expected value (EV) net of intervention costs and friction, and safely orchestrates recovery actions without ever initiating unauthorized debits or violating merchant safety policies.
+> An autonomous, bounded, closed-loop payment and receivables recovery engine built for the **Razorpay Buildathon**. It diagnoses transaction failures, predicts recovery propensity, optimizes recovery expected value (EV) net of intervention costs, and safely orchestrates recovery actions directly via Razorpay APIs.
+
+---
+
+## 📸 Product Screenshots
+
+| 1. Live Overview & Funnel Analytics | 2. Razorpay Live Links & Sync Stream |
+| :---: | :---: |
+| ![Dashboard Overview](https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&auto=format&fit=crop&q=60) | ![Live Payments](https://images.unsplash.com/photo-1563986768609-322da13575f3?w=800&auto=format&fit=crop&q=60) |
+| *Real-time revenue at risk, net recovered & conversion funnel* | *Interactive table with live rzp.io links & sync engine* |
+
+| 3. Explainable AI Decision Trail | 4. Human-in-the-Loop High Value Gates |
+| :---: | :---: |
+| ![AI Explainability](https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&auto=format&fit=crop&q=60) | ![Approvals Queue](https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=800&auto=format&fit=crop&q=60) |
+| *Step-by-step Opportunity scoring & rejection justifications* | *Supervised approval queue for high-ticket transactions* |
+
+*(Replace with your project screenshots in `./docs/screenshots/`)*
 
 ---
 
@@ -12,7 +28,7 @@ In the Indian digital payments ecosystem (UPI, cards, netbanking, recurring mand
 - **Negative Expected-Value Interventions**: Sending SMS/WhatsApp payment links on sub-rupee or low-ticket orders costs more in API fees and friction than the order value.
 - **Lack of Verification & True Incremental Measurement**: Many systems claim 100% of organic customer retries as "AI recovered" without running a rigorous treatment vs. control benchmark.
 
-The **Razorpay AI Revenue Recovery Agent** solves this through a rigorous 9-stage closed-loop architecture:
+**RazorRevive** solves this through a rigorous 9-stage closed-loop architecture:
 
 ```
 [ Ingest (Idempotent Webhooks) ]
