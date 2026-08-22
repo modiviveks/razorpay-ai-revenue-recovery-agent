@@ -2,46 +2,7 @@
 
 > An autonomous, bounded, closed-loop payment and receivables recovery engine built for the **Razorpay Buildathon**. It diagnoses transaction failures, predicts recovery propensity, optimizes recovery expected value (EV) net of intervention costs, and safely orchestrates recovery actions directly via Razorpay APIs.
 
----
 
-## 📸 Product Screenshots & Live Console Walkthrough
-
-### 1. Interactive Control Hub & Network Degradation Detector
-![Control Hub & Health Monitors](![Razorpay Test Mode](docs/images/razorpay-test-mode.png)
-)
-* **Interactive Testing Hub**: Inject failure scenarios (UPI timeouts, expired cards, bank declines), test mode link generation, real-time Razorpay Dashboard sync, and 10,000-event synthetic A/B significance tests.
-* **Payment Network Degradation Detector**: Real-time sliding window monitoring for `UPI` (96.0% success), `CARD` (94.0%), `NETBANKING` (91.0%), and `WALLET` (95.0%) to prevent redundant retries during gateway outages.
-* **Live KPI Metric Cards**: Live tracking of **Revenue at Risk (₹7,149.00 across 6 failure events)**, **Interventions Sent (5 / 83.3% rate)**, and value-weighted **Verified Recovery Rate**.
-
----
-
-### 2. Live Revenue-Risk Events & Explainable AI Audit Trail
-![Events Stream & Explainable AI](./docs/screenshots/events-and-explainable-ai.png)
-* **Recent Revenue-Risk Events Table**: Live classification of failures (e.g. `UPI_TIMEOUT`, `RECEIVABLE_OVERDUE`, `CARD_EXPIRED`, `BANK_DECLINE`, `CHECKOUT_ABANDONED`) with autonomous Next-Best-Actions and direct links to live Razorpay checkout links (`https://rzp.io/...`).
-* **Explainable Decision & Opportunity Scoring**:
-  * **Expected Value**: `₹435.00`
-  * **Cost + Friction**: `₹0.35`
-  * **Net Opportunity Score**: `₹434.65`
-* **Personalized Outreach Messaging**: Dynamic, bilingual message templates (Hindi/English) generated with direct one-click recovery links (`https://rzp.io/rzp/gxUeBDxI`).
-* **Cryptographic Audit Trail**: Step-by-step SHA-256 hashed audit log verifying policy check, ML ranking, and transactional outbox execution.
-
----
-
-### 3. Razorpay Official Merchant Dashboard Verification & Live Sync
-![Razorpay Dashboard Payment Links](./docs/screenshots/razorpay-dashboard-payment-links.png)
-* **Live Razorpay Test Mode Verification**: Direct proof of real-world integration showing live payment links created on the official Razorpay Merchant Portal (`dashboard.razorpay.com/app/paymentlinks`).
-* **Real-time Link Details**:
-  * `plink_TSo4WiPL95B0gB` — ₹499.00 (`https://rzp.io/rzp/weMfSNIN`, Ref: `rec_7_7`)
-  * `plink_TSo2JysVCffRtG` — ₹450.00 (`https://rzp.io/rzp/mVtsHVo`, Ref: `rec_4_4`)
-  * `plink_TSo2Jvx2joMc7A` — ₹3,000.00 (`https://rzp.io/rzp/l4617X7`, Ref: `rec_5_5`)
-  * `plink_TSo2K0km4o3zid` — ₹1,200.00 (`https://rzp.io/rzp/wfc4Ing`, Ref: `rec_2_2`)
-  * `plink_TSo2JqE8kCG57p` — ₹750.00 (`https://rzp.io/rzp/cCPGPOw`, Ref: `rec_1_1`)
-  * `plink_TSo2Jss7NQRqDH` — ₹999.00 (`https://rzp.io/rzp/vwvhezOK`, Ref: `rec_3_3`)
-* **Bidirectional Synchronization**: Seamlessly bidirectional — links generated autonomously by the AI agent appear instantly on Razorpay, and customer payments completed on Razorpay sync back to the agent in 1-click or via webhook.
-
----
-
----
 
 ## 🎯 Executive Overview & Problem Statement
 
