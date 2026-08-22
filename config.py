@@ -39,7 +39,15 @@ class Settings:
     USE_LLM_EXPLANATIONS: bool = env_bool("USE_LLM_EXPLANATIONS", bool(OPENAI_API_KEY))
     USE_AI_ADVISOR: bool = env_bool("USE_AI_ADVISOR", bool(OPENAI_API_KEY))
     AI_ADVISOR_MODEL: str = os.getenv("AI_ADVISOR_MODEL", "gpt-4o-mini")
-    MOCK_RAZORPAY: bool = env_bool("MOCK_RAZORPAY", True)
+    # Runtime execution mode: "mock" (default for local builds) or "test" (Razorpay Test Mode)
+    # Note: Live mode is intentionally prohibited for safety in this buildathon implementation.
+    RAZORPAY_MODE: str = os.getenv("RAZORPAY_MODE", "mock" if env_bool("MOCK_RAZORPAY", True) else "test").strip().lower()
+    if RAZORPAY_MODE == "live":
+        raise ValueError("Live mode is prohibited. This buildathon implementation strictly supports only 'mock' and 'test' modes.")
+    if RAZORPAY_MODE not in {"mock", "test"}:
+        raise ValueError(f"Invalid RAZORPAY_MODE '{RAZORPAY_MODE}'. Supported values are 'mock' and 'test'.")
+
+    MOCK_RAZORPAY: bool = (RAZORPAY_MODE == "mock")
     # Explicitly restricted to local/mock environments. Never enable this in production.
     ALLOW_TEST_WEBHOOK_BYPASS: bool = env_bool("ALLOW_TEST_WEBHOOK_BYPASS", MOCK_RAZORPAY)
     CORS_ORIGINS: list[str] = [
