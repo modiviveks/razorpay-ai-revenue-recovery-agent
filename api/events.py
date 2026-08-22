@@ -169,7 +169,8 @@ def get_stats(db: Session = Depends(get_db)):
         recovery_rate = round((recovered_actions / total_failures) * 100, 1)
 
     return {
-        "runtime_mode": "MOCK" if settings.MOCK_RAZORPAY else "LIVE",
+        "runtime_mode": "MOCK" if settings.MOCK_RAZORPAY else "RAZORPAY_TEST_MODE",
+        "is_test_mode": (settings.RAZORPAY_MODE == "test"),
         "total_failures": total_failures,
         "total_failed_amount_rupees": round(total_failed_amount / 100, 2),
         "recovery_links_created": recovery_links_created,
