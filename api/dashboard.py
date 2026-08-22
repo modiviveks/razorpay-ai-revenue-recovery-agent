@@ -264,6 +264,79 @@ def simulate_scenario(payload: SimulatePayload, db: Session = Depends(get_db)):
     }
 
 
+class RazorpayTestTriggerRequest(BaseModel):
+    amount_paise: int = 49900  # ₹499.00
+    customer_name: str = "Test Customer"
+    customer_email: str = "test.customer@example.com"
+    customer_contact: str = "+919876543210"
+    failure_reason: str = "UPI transaction timed out on customer PSP app"
+    method: str = "upi"
+    merchant_segment: str = "growth"
+
+
+@router.post("/demo/razorpay-test/payment-link")
+def trigger_razorpay_test_recovery(
+    payload: RazorpayTestTriggerRequest = RazorpayTestTriggerRequest(),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger the end-to-end recovery flow generating an authentic Razorpay Test Mode Payment Link.
+    This creates an actual Razorpay Payment Link in Test Mode when RAZORPAY_MODE='test' (or mock link in 'mock' mode).
+    """
+    uid = uuid.uuid4().hex[:6]
+    payment_id = f"pay_test_{uid}"
+    
+    event = PaymentEvent(
+        payment_id=payment_id,
+        order_id=f"order_test_{uid}",
+        amount=payload.amount_paise,
+        currency="INR",
+        method=payload.method,
+        status="at_risk",
+        risk_type="PAYMENT_FAILURE",
+        source_reference=payment_id,
+        error_code="BAD_REQUEST_ERROR" if payload.method == "upi" else "GATEWAY_ERROR",
+        error_description=payload.failure_reason,
+        customer_name=payload.customer_name,
+        customer_email=payload.customer_email,
+        customer_contact=payload.customer_contact,
+        merchant_segment=payload.merchant_segment,
+        webhook_event_id=f"evt_test_{uid}",
+        raw_payload=json.dumps({
+            "source": "razorpay_test_demo_trigger",
+            "amount": payload.amount_paise,
+            "mode": settings.RAZORPAY_MODE
+        }),
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    action = run_recovery_pipeline(
+        db=db,
+        event=event,
+    )
+
+    return {
+        "status": "success",
+        "mode": settings.RAZORPAY_MODE,
+        "is_test_mode": (settings.RAZORPAY_MODE == "test"),
+        "event_id": event.id,
+        "payment_id": event.payment_id,
+        "action_id": action.id,
+        "action_status": action.status.value,
+        "failure_class": action.failure_class.value,
+        "strategy": action.strategy.value,
+        "payment_link_id": action.new_payment_link_id,
+        "payment_link_url": action.new_payment_link_url,
+        "expected_recovery_amount_rupees": round((action.expected_recovery_amount or 0) / 100, 2),
+        "recovery_confidence": action.recovery_confidence,
+        "outreach_message": action.outreach_message,
+        "rationale": action.rationale,
+    }
+
+
 @router.post("/demo/reset")
 def reset_mock_demo(db: Session = Depends(get_db)):
     """Reset only local mock demo data; unavailable whenever real mode is enabled."""
