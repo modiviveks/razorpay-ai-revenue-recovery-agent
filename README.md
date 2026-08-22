@@ -139,7 +139,33 @@ python -m simulator.experiment --size 10000
 ```bash
 pytest -v
 ```
-All 40 unit and integration tests validate the entire recovery pipeline, degradation detector, opportunity scorer, approval queue, and statistical inference engine.
+All 48 unit and integration tests validate the entire recovery pipeline, degradation detector, opportunity scorer, approval queue, statistical inference engine, and the Razorpay Test Mode integration.
+
+---
+
+## ⚡ Razorpay Runtime Modes: Mock vs. Test Mode
+
+The recovery agent supports two runtime modes configured via `RAZORPAY_MODE`:
+
+### 1. Mock Mode (`RAZORPAY_MODE=mock`, Default)
+- **Zero Configuration**: Fully functional out of the box without external dependencies.
+- **Local Simulation**: Simulates payment link creation, simulated checkout redirect pages, and instant webhook confirmations.
+- **Safe Demonstration**: Allows triggering failure scenarios, B2B promises, high-value approvals, and 10,000-event A/B benchmarks safely offline.
+
+### 2. Razorpay Test Mode (`RAZORPAY_MODE=test`)
+- **Authentic Razorpay API Integration**: Communicates directly with the official Razorpay Test API using `razorpay-python` SDK.
+- **Real Payment Links**: Generates actual Razorpay Payment Links (`https://rzp.io/i/...`) in Test Mode that can be tested in Razorpay's sandbox.
+- **Official Webhook Verification**: Cryptographically verifies `X-Razorpay-Signature` HMAC-SHA256 headers for all incoming webhook events (`payment.failed`, `payment_link.paid`).
+- **Strict Safety Boundaries**:
+  - **No Live Mode**: The system strictly forbids `rzp_live_...` keys and refuses to start if live credentials are provided.
+  - **No Silent Fallback**: If an API call fails in Test Mode, it records an explicit `FAILED` audit record rather than silently falling back to mock behavior.
+- **Configuration (.env)**:
+  ```env
+  RAZORPAY_MODE=test
+  RAZORPAY_KEY_ID=rzp_test_YourKeyIdHere
+  RAZORPAY_KEY_SECRET=YourTestSecretHere
+  RAZORPAY_WEBHOOK_SECRET=YourWebhookSecretHere
+  ```
 
 ---
 
@@ -148,8 +174,9 @@ All 40 unit and integration tests validate the entire recovery pipeline, degrada
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/` | Serves the interactive Enterprise Dashboard UI |
-| `POST` | `/webhook/razorpay` | Authenticated webhook intake for payment failures and `payment_link.paid` events |
-| `GET` | `/api/stats` | High-level recovery metrics, at-risk totals, and conversion rates |
+| `POST` | `/webhook/razorpay` | Authenticated webhook intake for payment failures and `payment_link.paid` events (HMAC-SHA256 verified in Test Mode) |
+| `POST` | `/demo/razorpay-test/payment-link` | Triggers an end-to-end recovery action generating an authentic Razorpay Test Mode link |
+| `GET` | `/api/stats` | High-level recovery metrics, at-risk totals, conversion rates, and runtime mode indicator |
 | `GET` | `/api/events` | Stream of recent payment failure events and autonomous agent actions |
 | `GET` | `/api/analytics/funnel` | 4-stage executive recovery funnel and drop-off accounting |
 | `GET` | `/api/analytics/segments` | Merchant segment performance (Standard, Growth, Enterprise) |
