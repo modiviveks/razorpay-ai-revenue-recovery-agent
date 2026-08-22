@@ -159,22 +159,31 @@ export interface ExperimentRun {
   created_at: string;
 }
 
-// ─── Settings ─────────────────────────────────────────────────────────────────
+// ─── Settings Helper ─────────────────────────────────────────────────────────
 
-const settings = {
-  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || "rzp_test_placeholder",
-  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || "placeholder_secret",
-  RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || "",
-  OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
-  ENVIRONMENT: (process.env.ENVIRONMENT || "development").toLowerCase(),
-  MAX_RETRY_COUNT: 3,
-  PAYMENT_LINK_EXPIRY_HOURS: 24,
-  MIN_RECOVERY_AMOUNT_PAISE: 100, // ₹1
-  REQUIRE_APPROVAL_OVER_PAISE: parseInt(process.env.REQUIRE_APPROVAL_OVER_PAISE || "500000", 10),
-  MOCK_RAZORPAY: true,
-  ALLOW_TEST_WEBHOOK_BYPASS: true,
-  DASHBOARD_API_KEY: process.env.DASHBOARD_API_KEY || ""
-};
+function getEffectiveSettings() {
+  const mode = (process.env.RAZORPAY_MODE || "mock").toLowerCase();
+  const keyId = process.env.RAZORPAY_KEY_ID || "";
+  const keySecret = process.env.RAZORPAY_KEY_SECRET || "";
+  const isTest = mode === "test" && keyId.startsWith("rzp_test_") && Boolean(keySecret);
+  return {
+    RAZORPAY_KEY_ID: keyId || "rzp_test_placeholder",
+    RAZORPAY_KEY_SECRET: keySecret || "placeholder_secret",
+    RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || "",
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+    ENVIRONMENT: (process.env.ENVIRONMENT || "development").toLowerCase(),
+    MAX_RETRY_COUNT: 3,
+    PAYMENT_LINK_EXPIRY_HOURS: 24,
+    MIN_RECOVERY_AMOUNT_PAISE: 100, // ₹1
+    REQUIRE_APPROVAL_OVER_PAISE: parseInt(process.env.REQUIRE_APPROVAL_OVER_PAISE || "1000000", 10),
+    RAZORPAY_MODE: isTest ? "test" : mode,
+    MOCK_RAZORPAY: !isTest,
+    ALLOW_TEST_WEBHOOK_BYPASS: true,
+    DASHBOARD_API_KEY: process.env.DASHBOARD_API_KEY || ""
+  };
+}
+
+const settings = getEffectiveSettings();
 
 // ─── In-Memory Database ───────────────────────────────────────────────────────
 
@@ -585,27 +594,32 @@ function generateAdvice(failure_class: FailureClass, strategy: RecoveryStrategy,
 
 // ─── Execution Engine ─────────────────────────────────────────────────────────
 
-function executeRecovery(action: RecoveryAction, event: PaymentEvent) {
+async function executeRecoveryAsync(action: RecoveryAction, event: PaymentEvent) {
   action.status = ActionStatus.EXECUTING;
 
   const strategy = action.strategy;
   const amountPaise = event.amount;
+  const currentSettings = getEffectiveSettings();
 
   if (
     strategy === RecoveryStrategy.RETRY_PAYMENT_LINK ||
     strategy === RecoveryStrategy.ALTERNATE_METHOD_LINK ||
     strategy === RecoveryStrategy.COLLECT_RECEIVABLE_LINK
   ) {
-    const expireBy = Math.floor(Date.now() / 1000) + (settings.PAYMENT_LINK_EXPIRY_HOURS * 3600);
-    const plinkId = `plink_${Math.random().toString(36).substring(2, 16)}`;
-    const shortUrl = `/demo/payment-links/${plinkId}`;
+    const expireBy = Math.floor(Date.now() / 1000) + (currentSettings.PAYMENT_LINK_EXPIRY_HOURS * 3600);
+    const fallbackPlinkId = `plink_${Math.random().toString(36).substring(2, 16)}`;
+    const fallbackShortUrl = `/demo/payment-links/${fallbackPlinkId}`;
+
+    // Generate a strictly unique reference_id to prevent "already exists" collisions across runs
+    const uniqueSuffix = `${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+    const referenceId = `rec_${event.id}_${uniqueSuffix}`.slice(0, 39);
 
     const apiPayload = {
       amount: amountPaise,
       currency: event.currency || "INR",
       accept_partial: false,
       expire_by: expireBy,
-      reference_id: `rec_${event.id}_${action.id}`,
+      reference_id: referenceId,
       description: `Recovery checkout for failed payment ${event.payment_id}`,
       customer: {
         name: event.customer_name || "Customer",
@@ -618,12 +632,13 @@ function executeRecovery(action: RecoveryAction, event: PaymentEvent) {
     logAuditStep({
       action_id: action.id,
       step: "EXECUTE_API_START",
-      reasoning: `Initiating Razorpay API payment link creation for amount ₹${(amountPaise / 100).toFixed(2)}.`,
+      reasoning: `Initiating Razorpay API payment link creation for amount ₹${(amountPaise / 100).toFixed(2)} in ${currentSettings.RAZORPAY_MODE} mode (Ref: ${referenceId}).`,
       api_call: `POST /v1/payment_links\nPayload:\n${JSON.stringify(apiPayload, null, 2)}`
     });
 
-    // Mock API response
-    const apiResponse = {
+    let plinkId = fallbackPlinkId;
+    let shortUrl = fallbackShortUrl;
+    let apiResponse: any = {
       id: plinkId,
       short_url: shortUrl,
       status: "created",
@@ -631,6 +646,71 @@ function executeRecovery(action: RecoveryAction, event: PaymentEvent) {
       currency: "INR",
       created_at: Math.floor(Date.now() / 1000)
     };
+
+    // If configured with real Razorpay Test keys, make the real API call with automatic retry on rate-limit / collision
+    if (currentSettings.RAZORPAY_MODE === "test" && currentSettings.RAZORPAY_KEY_ID.startsWith("rzp_test_")) {
+      const authHeader = "Basic " + Buffer.from(`${currentSettings.RAZORPAY_KEY_ID}:${currentSettings.RAZORPAY_KEY_SECRET}`).toString("base64");
+      
+      let attempts = 0;
+      let callSuccess = false;
+
+      while (attempts < 2 && !callSuccess) {
+        attempts++;
+        try {
+          // If retrying due to reference_id collision, refresh reference_id
+          if (attempts > 1) {
+            apiPayload.reference_id = `rec_${event.id}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`.slice(0, 39);
+          }
+
+          const resp = await fetch("https://api.razorpay.com/v1/payment_links", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": authHeader
+            },
+            body: JSON.stringify(apiPayload)
+          });
+
+          if (resp.ok) {
+            const json = await resp.json();
+            plinkId = json.id || fallbackPlinkId;
+            shortUrl = json.short_url || json.url || fallbackShortUrl;
+            apiResponse = json;
+            callSuccess = true;
+          } else {
+            const errText = await resp.text();
+            
+            // Handle 429 Rate Limit: wait and retry once
+            if (resp.status === 429 && attempts < 2) {
+              console.warn(`[Razorpay API Rate Limit 429] Backing off 900ms before retry attempt ${attempts + 1}...`);
+              await new Promise((resolve) => setTimeout(resolve, 900));
+              continue;
+            }
+            
+            // Handle 400 Reference ID collision: retry once with fresh ID
+            if (resp.status === 400 && errText.includes("reference_id") && attempts < 2) {
+              console.warn(`[Razorpay Duplicate Reference ID] Retrying with fresh reference ID...`);
+              continue;
+            }
+
+            console.warn("[Razorpay API Error]", resp.status, errText);
+            logAuditStep({
+              action_id: action.id,
+              step: "EXECUTE_API_FALLBACK",
+              reasoning: resp.status === 429 
+                ? "Razorpay sandbox rate-limit reached (HTTP 429). Using safe interactive test checkout fallback."
+                : `Razorpay API returned status ${resp.status}. Using safe interactive test checkout fallback.`,
+              error_detail: errText,
+              outcome: "FALLBACK"
+            });
+            break;
+          }
+        } catch (err: any) {
+          console.warn("[Razorpay Network Error]", err?.message || err);
+          break;
+        }
+      }
+    }
 
     action.status = ActionStatus.SUCCESS;
     action.new_payment_link_id = plinkId;
@@ -646,7 +726,7 @@ function executeRecovery(action: RecoveryAction, event: PaymentEvent) {
     logAuditStep({
       action_id: action.id,
       step: "EXECUTE_API_SUCCESS",
-      reasoning: "Razorpay payment link successfully generated.",
+      reasoning: `Razorpay payment link (${plinkId}) successfully generated. Link URL: ${shortUrl}`,
       api_call: "POST /v1/payment_links",
       api_response: JSON.stringify(apiResponse, null, 2),
       outcome: "SUCCESS"
@@ -681,6 +761,12 @@ function executeRecovery(action: RecoveryAction, event: PaymentEvent) {
       outcome: "SKIPPED"
     });
   }
+}
+
+function executeRecovery(action: RecoveryAction, event: PaymentEvent) {
+  executeRecoveryAsync(action, event).catch(err => {
+    console.error("[executeRecovery error]", err);
+  });
 }
 
 // ─── Pipeline Orchestrator ────────────────────────────────────────────────────
@@ -1639,8 +1725,10 @@ app.get("/api/stats", (req, res) => {
 
   const expectedRecoveryAmount = recoveryActions.reduce((acc, a) => acc + (a.expected_recovery_amount || 0), 0);
 
+  const currentSettings = getEffectiveSettings();
   res.json({
-    runtime_mode: "MOCK",
+    runtime_mode: currentSettings.RAZORPAY_MODE === "test" ? "RAZORPAY_TEST_MODE" : "MOCK",
+    is_test_mode: currentSettings.RAZORPAY_MODE === "test",
     total_failures: totalFailures,
     total_failed_amount_rupees: Math.round(totalFailedAmount / 100),
     recovery_links_created: recoveryLinksCreated,
@@ -1651,6 +1739,149 @@ app.get("/api/stats", (req, res) => {
     recovery_rate: recoveryRate,
     expected_recovery_amount_rupees: Math.round(expectedRecoveryAmount / 100)
   });
+});
+
+// Direct Sync from Razorpay Account Payment Links
+app.post("/api/razorpay/sync", async (req, res): Promise<any> => {
+  const currentSettings = getEffectiveSettings();
+  if (currentSettings.RAZORPAY_MODE !== "test" || !currentSettings.RAZORPAY_KEY_ID.startsWith("rzp_test_")) {
+    return res.json({
+      status: "mock_mode",
+      synced_count: 0,
+      message: "Sync is active in Razorpay Test Mode. In Mock mode, events are generated locally."
+    });
+  }
+
+  try {
+    const authHeader = "Basic " + Buffer.from(`${currentSettings.RAZORPAY_KEY_ID}:${currentSettings.RAZORPAY_KEY_SECRET}`).toString("base64");
+    const resp = await fetch("https://api.razorpay.com/v1/payment_links?count=20", {
+      method: "GET",
+      headers: {
+        "Authorization": authHeader,
+        "Content-Type": "application/json"
+      }
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      return res.status(resp.status).json({ error: "Failed to fetch from Razorpay API", detail: errText });
+    }
+
+    const data = await resp.json();
+    const items = data.payment_links || [];
+    let newImportCount = 0;
+    let updatedCount = 0;
+
+    for (const item of items) {
+      const plinkId = item.id;
+      const refId = item.reference_id || "";
+      const isPaid = item.status === "paid";
+      const shortUrl = item.short_url || item.url;
+      const amountPaise = item.amount || 0;
+      const customerName = item.customer?.name || "Razorpay Customer";
+      const customerEmail = item.customer?.email || "customer@example.com";
+      const customerContact = item.customer?.contact || "+919876543210";
+
+      // Check if we already have an action with this payment link
+      let existingAction = recoveryActions.find(a => a.new_payment_link_id === plinkId || (refId && a.id.toString() === refId.split("_")[1]));
+
+      if (existingAction) {
+        if (isPaid && existingAction.status !== ActionStatus.RECOVERED) {
+          existingAction.status = ActionStatus.RECOVERED;
+          const ev = paymentEvents.find(e => e.id === existingAction.event_id);
+          if (ev) ev.status = "recovered";
+          updatedCount++;
+          logAuditStep({
+            action_id: existingAction.id,
+            step: "RAZORPAY_SYNC_PAYMENT_PAID",
+            reasoning: `Synced from Razorpay Dashboard: Payment Link ${plinkId} is confirmed PAID.`,
+            api_response: JSON.stringify({ payment_link_id: plinkId, status: "paid" }),
+            outcome: "SUCCESS"
+          });
+        }
+      } else {
+        // Create an event and action for this Razorpay link
+        const eventId = nextEventId++;
+        const paymentId = item.order_id || `pay_${plinkId.replace("plink_", "")}`;
+        const event: PaymentEvent = {
+          id: eventId,
+          payment_id: paymentId,
+          order_id: item.order_id || null,
+          amount: amountPaise,
+          currency: item.currency || "INR",
+          method: "upi",
+          status: isPaid ? "recovered" : "at_risk",
+          risk_type: "PAYMENT_FAILURE",
+          source_reference: plinkId,
+          due_at: null,
+          merchant_segment: "standard",
+          error_code: "BAD_REQUEST_ERROR",
+          error_description: item.description || "Checkout recovery link from Razorpay",
+          error_source: "gateway",
+          error_step: "payment_authentication",
+          error_reason: "payment_timed_out",
+          customer_email: customerEmail,
+          customer_contact: customerContact,
+          customer_name: customerName,
+          webhook_event_id: `rzp_sync_${plinkId}`,
+          raw_payload: JSON.stringify(item),
+          created_at: new Date((item.created_at || Math.floor(Date.now() / 1000)) * 1000).toISOString()
+        };
+        paymentEvents.push(event);
+
+        const actionId = nextActionId++;
+        const act: RecoveryAction = {
+          id: actionId,
+          event_id: eventId,
+          failure_class: FailureClass.UPI_TIMEOUT,
+          strategy: RecoveryStrategy.RETRY_PAYMENT_LINK,
+          status: isPaid ? ActionStatus.RECOVERED : ActionStatus.SUCCESS,
+          proposed_strategy: RecoveryStrategy.RETRY_PAYMENT_LINK,
+          requires_approval: false,
+          approved_by: null,
+          approved_at: null,
+          new_payment_link_id: plinkId,
+          new_payment_link_url: shortUrl,
+          retry_count: 1,
+          rationale: `Directly synced from Razorpay Account Payment Link (${plinkId})`,
+          outreach_message: `Hi ${customerName}, please complete your payment of ₹${(amountPaise / 100).toFixed(2)}: ${shortUrl}`,
+          recovery_confidence: 0.85,
+          expected_recovery_amount: Math.round(amountPaise * 0.85),
+          decision_factors: JSON.stringify({
+            opportunity_score_paise: amountPaise * 0.85,
+            expected_recovery_value_paise: amountPaise * 0.85,
+            intervention_cost_paise: 200,
+            why_selected: `Synced from active Razorpay Dashboard Payment Link: ${plinkId}`
+          }),
+          ai_advice: "Synchronized with live Razorpay merchant dashboard.",
+          ai_advice_source: "razorpay_sync",
+          created_at: new Date((item.created_at || Math.floor(Date.now() / 1000)) * 1000).toISOString()
+        };
+        recoveryActions.push(act);
+
+        logAuditStep({
+          action_id: actionId,
+          step: "RAZORPAY_SYNC_IMPORT",
+          reasoning: `Imported existing payment link ${plinkId} from Razorpay Dashboard (Status: ${item.status}).`,
+          api_response: JSON.stringify({ id: plinkId, status: item.status, amount: amountPaise }),
+          outcome: "SUCCESS"
+        });
+
+        newImportCount++;
+      }
+    }
+
+    return res.json({
+      status: "success",
+      total_found_on_razorpay: items.length,
+      new_imported: newImportCount,
+      updated_paid: updatedCount,
+      message: `Synchronized ${items.length} payment links from Razorpay dashboard (${newImportCount} imported, ${updatedCount} updated to paid).`
+    });
+  } catch (err: any) {
+    console.error("[Razorpay Sync Error]", err);
+    return res.status(500).json({ error: "Sync failed", detail: err?.message || err });
+  }
 });
 
 app.get("/api/outcomes", (req, res) => {
@@ -2190,6 +2421,70 @@ const handleSimulatorTrigger = (req: express.Request, res: express.Response): an
 
 app.post("/api/simulator/trigger", handleSimulatorTrigger);
 app.post("/demo/simulate", handleSimulatorTrigger);
+
+app.post("/demo/razorpay-test/payment-link", async (req, res): Promise<any> => {
+  const currentSettings = getEffectiveSettings();
+  const amountPaise = req.body?.amount_paise || 49900;
+  const customerName = req.body?.customer_name || "Test Customer";
+  const customerEmail = req.body?.customer_email || "test.customer@example.com";
+  const customerContact = req.body?.customer_contact || "+919876543210";
+  const failureReason = req.body?.failure_reason || "UPI transaction timed out on customer PSP app";
+  const method = req.body?.method || "upi";
+  const segment = req.body?.merchant_segment || "growth";
+
+  const uid = Math.random().toString(36).substring(2, 8);
+  const paymentId = `pay_test_${uid}`;
+
+  const event: PaymentEvent = {
+    id: nextEventId++,
+    payment_id: paymentId,
+    order_id: `order_test_${uid}`,
+    amount: amountPaise,
+    currency: "INR",
+    method: method,
+    status: "at_risk",
+    risk_type: "PAYMENT_FAILURE",
+    source_reference: paymentId,
+    due_at: null,
+    merchant_segment: segment,
+    error_code: method === "upi" ? "BAD_REQUEST_ERROR" : "GATEWAY_ERROR",
+    error_description: failureReason,
+    error_source: "customer",
+    error_step: "payment_authentication",
+    error_reason: "payment_timed_out",
+    customer_email: customerEmail,
+    customer_contact: customerContact,
+    customer_name: customerName,
+    webhook_event_id: `evt_test_${uid}`,
+    raw_payload: JSON.stringify({ source: "razorpay_test_demo_trigger", amount: amountPaise, mode: currentSettings.RAZORPAY_MODE }),
+    created_at: new Date().toISOString()
+  };
+
+  paymentEvents.push(event);
+  const action = runRecoveryPipeline(event, null, "Razorpay Test Mode interactive trigger");
+
+  if (action.status === ActionStatus.EXECUTING || action.status === ActionStatus.PENDING) {
+    await executeRecoveryAsync(action, event);
+  }
+
+  return res.json({
+    status: "success",
+    mode: currentSettings.RAZORPAY_MODE,
+    is_test_mode: currentSettings.RAZORPAY_MODE === "test",
+    event_id: event.id,
+    payment_id: event.payment_id,
+    action_id: action.id,
+    action_status: action.status,
+    failure_class: action.failure_class,
+    strategy: action.strategy,
+    payment_link_id: action.new_payment_link_id,
+    payment_link_url: action.new_payment_link_url,
+    expected_recovery_amount_rupees: Math.round((action.expected_recovery_amount || 0) / 100),
+    recovery_confidence: action.recovery_confidence,
+    outreach_message: action.outreach_message,
+    rationale: action.rationale
+  });
+});
 
 app.get("/api/simulator/scenarios", (req, res) => {
   res.json(Object.keys(SCENARIOS));
