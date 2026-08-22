@@ -7,7 +7,8 @@
 ## 📸 Product Screenshots & Live Console Walkthrough
 
 ### 1. Interactive Control Hub & Network Degradation Detector
-![Control Hub & Health Monitors](./docs/screenshots/control-hub-degradation.png)
+![Control Hub & Health Monitors](<img width="1917" height="844" alt="image" src="https://github.com/user-attachments/assets/6f9e8cf1-c95c-455b-be0d-2afe8ee46d7d" />
+)
 * **Interactive Testing Hub**: Inject failure scenarios (UPI timeouts, expired cards, bank declines), test mode link generation, real-time Razorpay Dashboard sync, and 10,000-event synthetic A/B significance tests.
 * **Payment Network Degradation Detector**: Real-time sliding window monitoring for `UPI` (96.0% success), `CARD` (94.0%), `NETBANKING` (91.0%), and `WALLET` (95.0%) to prevent redundant retries during gateway outages.
 * **Live KPI Metric Cards**: Live tracking of **Revenue at Risk (₹7,149.00 across 6 failure events)**, **Interventions Sent (5 / 83.3% rate)**, and value-weighted **Verified Recovery Rate**.
@@ -27,8 +28,7 @@
 ---
 
 ### 3. Razorpay Official Merchant Dashboard Verification & Live Sync
-![Razorpay Dashboard Payment Links](<img width="1912" height="918" alt="image" src="https://github.com/user-attachments/assets/fef7676b-a2df-4ae4-b233-a0a26aacb276" />
-)
+![Razorpay Dashboard Payment Links](./docs/screenshots/razorpay-dashboard-payment-links.png)
 * **Live Razorpay Test Mode Verification**: Direct proof of real-world integration showing live payment links created on the official Razorpay Merchant Portal (`dashboard.razorpay.com/app/paymentlinks`).
 * **Real-time Link Details**:
   * `plink_TSo4WiPL95B0gB` — ₹499.00 (`https://rzp.io/rzp/weMfSNIN`, Ref: `rec_7_7`)
