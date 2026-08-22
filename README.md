@@ -8,15 +8,16 @@
 
 | 1. Live Overview & Funnel Analytics | 2. Razorpay Live Links & Sync Stream |
 | :---: | :---: |
-| ![Dashboard Overview](https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&auto=format&fit=crop&q=60) | ![Live Payments](https://images.unsplash.com/photo-1563986768609-322da13575f3?w=800&auto=format&fit=crop&q=60) |
+| ![Dashboard Overview](<img width="1891" height="845" alt="image" src="https://github.com/user-attachments/assets/2eba4032-525b-40f9-9071-1b1bfc7d3da3" />
+) |
 | *Real-time revenue at risk, net recovered & conversion funnel* | *Interactive table with live rzp.io links & sync engine* |
 
 | 3. Explainable AI Decision Trail | 4. Human-in-the-Loop High Value Gates |
 | :---: | :---: |
-| ![AI Explainability](https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&auto=format&fit=crop&q=60) | ![Approvals Queue](https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=800&auto=format&fit=crop&q=60) |
+| ![AI Explainability](<img width="1916" height="853" alt="image" src="https://github.com/user-attachments/assets/435c0470-28ce-4b28-bda2-a427f83788a9" />
+) |
 | *Step-by-step Opportunity scoring & rejection justifications* | *Supervised approval queue for high-ticket transactions* |
 
-*(Replace with your project screenshots in `./docs/screenshots/`)*
 
 ---
 
