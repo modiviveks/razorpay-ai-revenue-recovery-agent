@@ -27,7 +27,8 @@
 ---
 
 ### 3. Razorpay Official Merchant Dashboard Verification & Live Sync
-![Razorpay Dashboard Payment Links](./docs/screenshots/razorpay-dashboard-payment-links.png)
+![Razorpay Dashboard Payment Links](<img width="1912" height="918" alt="image" src="https://github.com/user-attachments/assets/fef7676b-a2df-4ae4-b233-a0a26aacb276" />
+)
 * **Live Razorpay Test Mode Verification**: Direct proof of real-world integration showing live payment links created on the official Razorpay Merchant Portal (`dashboard.razorpay.com/app/paymentlinks`).
 * **Real-time Link Details**:
   * `plink_TSo4WiPL95B0gB` — ₹499.00 (`https://rzp.io/rzp/weMfSNIN`, Ref: `rec_7_7`)
