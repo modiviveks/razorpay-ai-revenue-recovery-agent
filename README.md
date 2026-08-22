@@ -7,7 +7,7 @@
 ## 📸 Product Screenshots & Live Console Walkthrough
 
 ### 1. Interactive Control Hub & Network Degradation Detector
-![Control Hub & Health Monitors](<img width="1917" height="844" alt="image" src="https://github.com/user-attachments/assets/6f9e8cf1-c95c-455b-be0d-2afe8ee46d7d" />
+![Control Hub & Health Monitors](![Razorpay Test Mode](docs/images/razorpay-test-mode.png)
 )
 * **Interactive Testing Hub**: Inject failure scenarios (UPI timeouts, expired cards, bank declines), test mode link generation, real-time Razorpay Dashboard sync, and 10,000-event synthetic A/B significance tests.
 * **Payment Network Degradation Detector**: Real-time sliding window monitoring for `UPI` (96.0% success), `CARD` (94.0%), `NETBANKING` (91.0%), and `WALLET` (95.0%) to prevent redundant retries during gateway outages.
