@@ -88,8 +88,16 @@
                         <i class="fa-solid fa-bolt"></i> Trigger Failure
                     </button>
 
-                    <button onclick="runExperimentSimulation()" id="btn-run-exp" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3.5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5">
-                        <i class="fa-solid fa-flask-vial"></i> Synthetic A/B Impact (10k)
+                    <button onclick="triggerRazorpayTestMode()" id="btn-trigger-rzp-test" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3.5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5" title="Generate authentic recovery link via Razorpay API">
+                        <i class="fa-solid fa-link"></i> Test Mode Link
+                    </button>
+
+                    <button onclick="syncRazorpayLinks()" id="btn-sync-rzp" class="bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold px-3.5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5" title="Sync all active & paid links directly from Razorpay Dashboard">
+                        <i class="fa-solid fa-arrows-rotate"></i> Sync Razorpay
+                    </button>
+
+                    <button onclick="runExperimentSimulation()" id="btn-run-exp" class="bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold px-3.5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5">
+                        <i class="fa-solid fa-flask-vial text-emerald-400"></i> Synthetic A/B (10k)
                     </button>
                 </div>
             </div>
@@ -407,7 +415,15 @@
                 document.getElementById('stat-recovered-amount').innerText = `₹${d.recovered_amount_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
                 document.getElementById('stat-recovered-count').innerText = `${d.successful_recoveries} verified settlements`;
                 document.getElementById('stat-recovery-rate').innerText = `${d.recovery_rate}%`;
-                document.getElementById('mode-badge').innerText = `${d.runtime_mode} Mode`;
+                
+                const badge = document.getElementById('mode-badge');
+                if (d.runtime_mode === 'RAZORPAY_TEST_MODE' || d.is_test_mode) {
+                    badge.className = 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-lg text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5';
+                    badge.innerHTML = '<i class="fa-solid fa-flask text-emerald-400"></i> Razorpay Test Mode';
+                } else {
+                    badge.className = 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-1 rounded-lg text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5';
+                    badge.innerHTML = '<i class="fa-solid fa-laptop-code text-indigo-400"></i> Mock Mode';
+                }
             } catch (err) {
                 console.error('Error fetching stats:', err);
             }
@@ -880,6 +896,60 @@
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Trigger Failure';
+            }
+        }
+
+        async function triggerRazorpayTestMode() {
+            const btn = document.getElementById('btn-trigger-rzp-test');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> Generating...';
+            try {
+                const res = await fetch('/demo/razorpay-test/payment-link', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        amount_paise: 49900,
+                        customer_name: 'Test Customer',
+                        customer_email: 'test.customer@example.com',
+                        failure_reason: 'UPI transaction timed out on customer PSP app',
+                        method: 'upi'
+                    })
+                });
+                const data = await res.json();
+                const notif = document.getElementById('sim-notification');
+                const notifText = document.getElementById('sim-notification-text');
+                notif.classList.remove('hidden');
+                notifText.innerHTML = `<strong>Recovery Action #${data.action_id} Generated:</strong> Link ID: <span class="font-mono">${data.payment_link_id || 'N/A'}</span> (<a href="${data.payment_link_url}" target="_blank" class="underline font-bold text-indigo-700 hover:text-indigo-900">${data.payment_link_url}</a>)`;
+                refreshData();
+            } catch (err) {
+                alert(`Test Mode Trigger error: ${err.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-link"></i> Test Mode Link';
+            }
+        }
+
+        async function syncRazorpayLinks() {
+            const btn = document.getElementById('btn-sync-rzp');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> Syncing...';
+            try {
+                const res = await fetch('/api/razorpay/sync', { method: 'POST' });
+                const data = await res.json();
+                const notif = document.getElementById('sim-notification');
+                const notifText = document.getElementById('sim-notification-text');
+                notif.classList.remove('hidden');
+                if (data.status === 'success') {
+                    notifText.innerHTML = `<strong>🔄 Razorpay Sync Complete:</strong> Found <strong>${data.total_found_on_razorpay}</strong> links on your Razorpay account (${data.new_imported} new imported, ${data.updated_paid} updated to paid).`;
+                } else {
+                    notifText.innerHTML = `<strong>Notice:</strong> ${data.message || 'Sync not available in current mode.'}`;
+                }
+                refreshData();
+            } catch (err) {
+                alert(`Sync error: ${err.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Sync Razorpay';
             }
         }
 
