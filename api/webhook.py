@@ -10,7 +10,7 @@ from database import get_db
 from models import PaymentEvent, RecoveryAction, ActionStatus, FailureClass, RecoveryOutbox, OutboxStatus
 from agent.worker import process_outbox_job
 from agent.executor import log_audit_step
-from razorpay_client.client import razorpay_client
+from razorpay_client.client import razorpay_client, get_razorpay_client
 from config import settings
 
 router = APIRouter(prefix="/webhook", tags=["Webhook"])
@@ -62,7 +62,8 @@ async def handle_razorpay_webhook(
         if not x_razorpay_signature:
             raise HTTPException(status_code=400, detail="Missing X-Razorpay-Signature header")
         try:
-            razorpay_client.utility.verify_webhook_signature(
+            client = razorpay_client or get_razorpay_client()
+            client.utility.verify_webhook_signature(
                 body_str,
                 x_razorpay_signature,
                 settings.RAZORPAY_WEBHOOK_SECRET
