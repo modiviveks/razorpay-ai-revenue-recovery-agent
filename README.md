@@ -6,17 +6,14 @@
 
 ## 📸 Product Screenshots
 
-| 1. Live Overview & Funnel Analytics | 2. Razorpay Live Links & Sync Stream |
-| :---: | :---: |
-| ![Dashboard Overview](<img width="1891" height="845" alt="image" src="https://github.com/user-attachments/assets/2eba4032-525b-40f9-9071-1b1bfc7d3da3" />
-) |
-| *Real-time revenue at risk, net recovered & conversion funnel* | *Interactive table with live rzp.io links & sync engine* |
+| 1. Live Overview & Funnel Analytics | 2. Razorpay Live Links & Sync Stream 
+| [Dashboard Overview](<img width="1891" height="845" alt="image" src="https://github.com/user-attachments/assets/2eba4032-525b-40f9-9071-1b1bfc7d3da3" />
+) 
+
 
 | 3. Explainable AI Decision Trail | 4. Human-in-the-Loop High Value Gates |
-| :---: | :---: |
-| ![AI Explainability](<img width="1916" height="853" alt="image" src="https://github.com/user-attachments/assets/435c0470-28ce-4b28-bda2-a427f83788a9" />
-) |
-| *Step-by-step Opportunity scoring & rejection justifications* | *Supervised approval queue for high-ticket transactions* |
+| [AI Explainability](<img width="1916" height="853" alt="image" src="https://github.com/user-attachments/assets/435c0470-28ce-4b28-bda2-a427f83788a9" />
+) 
 
 
 ---
