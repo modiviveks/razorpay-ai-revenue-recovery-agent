@@ -7,7 +7,7 @@ import hashlib
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from models import RecoveryAction, PaymentEvent, AuditLog, ActionStatus, RecoveryStrategy
-from razorpay_client.client import razorpay_client
+from razorpay_client.client import razorpay_client, get_razorpay_client
 from config import settings
 
 
@@ -108,8 +108,9 @@ def execute_recovery(db: Session, action: RecoveryAction, event: PaymentEvent):
         )
 
         try:
-            # Make call to Razorpay (or mock client)
-            response = razorpay_client.payment_link.create(payload)
+            # Make call to Razorpay (test mode or mock client)
+            client = razorpay_client or get_razorpay_client()
+            response = client.payment_link.create(payload)
             
             # Extract link info
             # Handle both dictionary (dict SDK response) and object types
