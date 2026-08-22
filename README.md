@@ -20,7 +20,8 @@
 <!-- Replace the URL below with your image path or hosted image URL -->
 <!-- ========================================================================= -->
 <p align="center">
-  <img src="./docs/screenshots/control-hub-degradation.png" alt="Control Hub & Network Degradation Detector" width="100%" />
+  <img src="<img width="1913" height="853" alt="image" src="https://github.com/user-attachments/assets/b1a55c55-ea07-49f4-bd56-78888667b80b" />
+" width="100%" />
 </p>
 
 * **Interactive Testing Hub**: Inject failure scenarios (`UPI Timeout`, `Card Expired`, `Bank Decline`, `Checkout Abandonment`, `Receivable Overdue`), test mode link generation, real-time Razorpay Dashboard sync, and 10,000-event synthetic A/B significance tests.
