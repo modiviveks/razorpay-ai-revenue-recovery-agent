@@ -5,7 +5,6 @@
 
 ---
 
-
 ## 🎯 Executive Overview & Problem Statement
 
 In the Indian digital payments ecosystem (UPI, cards, netbanking, recurring mandates), payment failures cause massive revenue leakage for merchants:
