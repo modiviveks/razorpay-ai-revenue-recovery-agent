@@ -1,0 +1,8 @@
+{
+  "name": "RazorRevive — AI Revenue Recovery Agent",
+  "description": "Payment failure diagnostics, ML recovery propensity scoring, and Razorpay recovery orchestration with policy safety gates and cryptographic audit trails.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -205,7 +205,7 @@ class RazorpayTestClient(RazorpayClientInterface):
         if key_id.startswith("rzp_live_"):
             raise ValueError(
                 "Live Razorpay credentials ('rzp_live_...') are strictly prohibited. "
-                "This buildathon implementation only supports Razorpay Test Mode ('rzp_test_...')."
+                "This client only supports Razorpay Test Mode ('rzp_test_...')."
             )
         if not key_id.startswith("rzp_test_"):
             # Provide helpful guidance if placeholder is left in test mode
@@ -234,7 +234,7 @@ def get_razorpay_client(
 
     if target_mode == "live":
         raise ValueError(
-            "Live mode is prohibited. This buildathon implementation strictly supports only 'mock' and 'test' modes."
+            "Live mode is prohibited. This client strictly supports only 'mock' and 'test' modes."
         )
 
     if target_mode == "test":

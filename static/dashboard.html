@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RazorRevive — Autonomous AI Revenue Recovery Agent</title>
+    <title>RazorRevive — Payment Recovery Console</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -36,13 +36,16 @@
                 </div>
                 <div>
                     <div class="flex items-center gap-2">
-                        <span class="font-bold text-base tracking-tight text-white flex items-center gap-1.5"><span class="text-emerald-400">RazorRevive</span> AI</span>
-                        <span class="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-semibold px-2 py-0.5 rounded">v2.0 Buildathon</span>
+                        <span class="font-bold text-base tracking-tight text-white flex items-center gap-1.5"><span class="text-emerald-400">RazorRevive</span></span>
+                        <span class="bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold px-2 py-0.5 rounded">Operations Console</span>
                     </div>
-                    <p class="text-[11px] text-slate-400">Autonomous revenue recovery with deterministic safety, opportunity scoring & Razorpay integrations</p>
+                    <p class="text-[11px] text-slate-400">Payment failure diagnostics, opportunity scoring & Razorpay recovery automation</p>
                 </div>
             </div>
             <div class="flex items-center gap-2.5">
+                <button onclick="openBatchEvalModal()" id="btn-batch-eval" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 rounded-lg transition shadow-sm flex items-center gap-1.5">
+                    <i class="fa-solid fa-list-check text-indigo-200"></i> Batch Report (50)
+                </button>
                 <button onclick="openCalibrationModal()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5">
                     <i class="fa-solid fa-chart-simple text-cyan-400"></i> Model Calibration
                 </button>
@@ -60,9 +63,9 @@
             <div class="flex flex-wrap items-center justify-between gap-4">
                 <div>
                     <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                        <i class="fa-solid fa-sliders text-indigo-600"></i> Interactive Recovery Control & Testing Hub
+                        <i class="fa-solid fa-sliders text-indigo-600"></i> Scenario Testing & Event Triggers
                     </h2>
-                    <p class="text-xs text-slate-500 mt-0.5">Inject webhook failure scenarios, test negative-EV decisions, or run synthetic 10,000-event A/B benchmarks</p>
+                    <p class="text-xs text-slate-500 mt-0.5">Simulate webhook failure events, evaluate policy decisions, or benchmark recovery outcomes</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2.5">
                     <select id="sim-scenario" class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -377,6 +380,29 @@
             </div>
             <div id="calibration-content" class="flex-grow overflow-y-auto space-y-4 pr-1 text-xs">
                 <!-- Dynamically populated -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Batch Evaluation & Measured Recovery Modal -->
+    <div id="batch-eval-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+                <div>
+                    <h3 class="font-bold text-base text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-list-check text-indigo-600"></i> Batch Evaluation & Measured Recovery Report
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-0.5">Automated benchmark evaluation across 50 failure events with stopping rules & financial accounting</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="runBatchEvaluationModal(50)" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 rounded-lg transition shadow-sm flex items-center gap-1">
+                        <i class="fa-solid fa-rotate text-indigo-200"></i> Re-Run (50)
+                    </button>
+                    <button onclick="document.getElementById('batch-eval-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 p-2 text-lg">✕</button>
+                </div>
+            </div>
+            <div id="batch-eval-content" class="space-y-4 text-xs">
+                <!-- Populated dynamically -->
             </div>
         </div>
     </div>
@@ -950,6 +976,120 @@
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Sync Razorpay';
+            }
+        }
+
+        async function openBatchEvalModal() {
+            const modal = document.getElementById('batch-eval-modal');
+            modal.classList.remove('hidden');
+            await runBatchEvaluationModal(50);
+        }
+
+        async function runBatchEvaluationModal(batchSize = 50) {
+            const content = document.getElementById('batch-eval-content');
+            content.innerHTML = `<div class="text-center py-12 text-slate-400"><i class="fa-solid fa-spinner animate-spin text-3xl text-indigo-600 mb-3"></i><p class="font-medium text-slate-600">Executing ${batchSize}-event synthetic batch evaluation...</p><p class="text-[11px] text-slate-400 mt-1">Simulating failures, evaluating opportunity scores, testing stopping rules, and generating BATCH_REPORT.md</p></div>`;
+            try {
+                const res = await fetch('/demo/batch-evaluation', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({batch_size: batchSize, seed: 42, auto_pay: true, auto_pay_rate: 0.65})
+                });
+                const data = await res.json();
+                const pb = data.policy_blocks || {};
+                const fcList = Object.entries(data.by_failure_class || {});
+
+                content.innerHTML = `
+                    <div class="bg-indigo-50 border border-indigo-200 p-3.5 rounded-xl flex items-center justify-between text-xs">
+                        <div class="text-indigo-950 font-medium">
+                            <span class="font-bold">✅ Batch Evaluation Complete:</span> Analyzed <strong>${data.batch_size}</strong> events in <strong>${data.duration_seconds}s</strong>. Markdown artifact saved to <code class="bg-indigo-100 px-1.5 py-0.5 rounded font-mono text-[11px]">BATCH_REPORT.md</code>.
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                            <span class="text-slate-400 block text-[10px] uppercase font-semibold">Total At Risk</span>
+                            <strong class="text-slate-900 font-mono text-base">₹${data.total_at_risk_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</strong>
+                            <span class="text-[10px] text-slate-400 block mt-0.5">${data.batch_size} failure events</span>
+                        </div>
+                        <div class="p-3.5 rounded-xl bg-indigo-50/70 border border-indigo-100">
+                            <span class="text-indigo-700 block text-[10px] uppercase font-semibold">Interventions Sent</span>
+                            <strong class="text-indigo-700 font-mono text-base">${data.total_interventions}</strong>
+                            <span class="text-[10px] text-indigo-500 block mt-0.5">${data.intervention_rate_pct}% dispatch rate</span>
+                        </div>
+                        <div class="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                            <span class="text-emerald-700 block text-[10px] uppercase font-semibold">Settled Recovered</span>
+                            <strong class="text-emerald-700 font-mono text-base">₹${data.total_recovered_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</strong>
+                            <span class="text-[10px] text-emerald-600 block mt-0.5">${data.total_settled_recoveries} verified settlements</span>
+                        </div>
+                        <div class="p-3.5 rounded-xl bg-teal-50 border border-teal-200">
+                            <span class="text-teal-700 block text-[10px] uppercase font-semibold">Value Recovery Rate</span>
+                            <strong class="text-teal-700 font-mono text-base">${data.value_recovery_rate_pct}%</strong>
+                            <span class="text-[10px] text-teal-600 block mt-0.5">${data.event_recovery_rate_pct}% event rate</span>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                            <i class="fa-solid fa-shield-halved text-indigo-600"></i> Policy Enforcement & Stopping Rules
+                        </h4>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                            <div class="bg-white p-2.5 rounded-lg border border-slate-200">
+                                <span class="text-slate-400 block text-[10px]">Negative-EV Skipped:</span>
+                                <strong class="font-mono text-slate-800">${pb.NEGATIVE_EV_SKIPPED || 0}</strong>
+                            </div>
+                            <div class="bg-white p-2.5 rounded-lg border border-slate-200">
+                                <span class="text-slate-400 block text-[10px]">High-Value Approval:</span>
+                                <strong class="font-mono text-amber-600">${pb.HIGH_VALUE_PENDING_APPROVAL || 0}</strong>
+                            </div>
+                            <div class="bg-white p-2.5 rounded-lg border border-slate-200">
+                                <span class="text-slate-400 block text-[10px]">Retry Bounds Quota:</span>
+                                <strong class="font-mono text-rose-600">${pb.BOUNDS_EXCEEDED || 0}</strong>
+                            </div>
+                            <div class="bg-white p-2.5 rounded-lg border border-slate-200">
+                                <span class="text-slate-400 block text-[10px]">Promise Grace Paused:</span>
+                                <strong class="font-mono text-indigo-600">${pb.PROMISE_ACTIVE || 0}</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="border border-slate-200 rounded-xl overflow-hidden">
+                        <div class="bg-slate-50 px-4 py-2.5 font-bold text-xs text-slate-800 border-b border-slate-200 flex items-center justify-between">
+                            <span>Breakdown by Failure Classification</span>
+                            <span class="text-slate-400 font-normal text-[11px]">${fcList.length} Categories</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs border-collapse">
+                                <thead>
+                                    <tr class="bg-slate-50/50 text-slate-500 font-semibold border-b border-slate-200">
+                                        <th class="px-4 py-2">Failure Class</th>
+                                        <th class="px-4 py-2 text-right">Count</th>
+                                        <th class="px-4 py-2 text-right">At Risk (₹)</th>
+                                        <th class="px-4 py-2 text-right">Interventions</th>
+                                        <th class="px-4 py-2 text-right">Recovered (₹)</th>
+                                        <th class="px-4 py-2 text-right">Yield</th>
+                                        <th class="px-4 py-2">Primary Strategy</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100">
+                                    ${fcList.map(([name, item]) => `
+                                        <tr class="hover:bg-slate-50/60">
+                                            <td class="px-4 py-2 font-mono font-semibold text-slate-800">${name}</td>
+                                            <td class="px-4 py-2 text-right font-mono text-slate-600">${item.count}</td>
+                                            <td class="px-4 py-2 text-right font-mono">₹${item.at_risk_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                            <td class="px-4 py-2 text-right font-mono">${item.interventions}</td>
+                                            <td class="px-4 py-2 text-right font-mono text-emerald-700 font-semibold">₹${item.recovered_rupees.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                            <td class="px-4 py-2 text-right font-bold ${item.recovery_rate_pct > 0 ? 'text-indigo-600' : 'text-slate-400'}">${item.recovery_rate_pct}%</td>
+                                            <td class="px-4 py-2"><span class="px-2 py-0.5 rounded bg-indigo-50 border border-indigo-100 text-indigo-700 font-semibold text-[10px]">${item.primary_strategy}</span></td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                refreshData();
+            } catch (err) {
+                content.innerHTML = `<div class="text-rose-500 py-6 text-center">Batch evaluation failed: ${err.message}</div>`;
             }
         }
 

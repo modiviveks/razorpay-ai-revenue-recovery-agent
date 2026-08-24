@@ -1343,9 +1343,9 @@ h1{margin:18px 0 8px} .amount{font-size:32px;font-weight:800;margin:20px 0} p{co
 button{width:100%;padding:14px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
 button:disabled{background:#94a3b8;cursor:default} #result{margin-top:16px;font-weight:700}
 </style></head><body><main class='card'>
-<span class='tag'>LOCAL DEMO · NO REAL MONEY</span><h1>Recovery checkout</h1>
+<span class='tag'>SANDBOX / MOCK MODE · NO REAL MONEY</span><h1>Recovery checkout</h1>
 <p>Payment link <code>${paymentLinkId}</code></p><div class='amount'>${amount}</div>
-<p>Current status: <strong id='status'>${status}</strong>. This page exists only in mock mode for a clickable buildathon demonstration.</p>
+<p>Current status: <strong id='status'>${status}</strong>. This page simulates payment checkout in mock mode.</p>
 <button id='pay' ${disabled} onclick='pay()'>${buttonText}</button><div id='result'></div>
 <script>async function pay(){
   const response = await fetch('/demo/payment-links/${paymentLinkId}/pay', {method:'POST'});
@@ -2421,6 +2421,219 @@ const handleSimulatorTrigger = (req: express.Request, res: express.Response): an
 
 app.post("/api/simulator/trigger", handleSimulatorTrigger);
 app.post("/demo/simulate", handleSimulatorTrigger);
+
+app.post("/demo/batch-evaluation", async (req, res): Promise<any> => {
+  const batchSize = Math.min(Math.max(parseInt(req.body?.batch_size || "50", 10), 10), 200);
+  const seed = parseInt(req.body?.seed || "42", 10);
+  const autoPay = req.body?.auto_pay !== false;
+  const autoPayRate = typeof req.body?.auto_pay_rate === "number" ? req.body.auto_pay_rate : 0.65;
+
+  const startTime = Date.now();
+  const distribution: [FailureClass, number, string, string, string][] = [
+    [FailureClass.UPI_TIMEOUT, 0.35, "upi", "GATEWAY_ERROR", "Payment was not completed by user within timeout period."],
+    [FailureClass.BANK_DECLINE, 0.18, "netbanking", "GATEWAY_ERROR", "Transaction declined by customer issuing bank switch."],
+    [FailureClass.INSUFFICIENT_FUNDS, 0.15, "card", "BAD_REQUEST_ERROR", "Customer card or account has insufficient funds."],
+    [FailureClass.CARD_EXPIRED, 0.10, "card", "BAD_REQUEST_ERROR", "Card validity expired or entered incorrectly."],
+    [FailureClass.PAYMENT_CANCELLED, 0.08, "upi", "BAD_REQUEST_ERROR", "Customer cancelled payment flow on checkout."],
+    [FailureClass.SUBSCRIPTION_FAILED, 0.05, "card", "GATEWAY_ERROR", "Recurring mandate auto-debit charge execution failed."],
+    [FailureClass.CHECKOUT_ABANDONED, 0.05, "upi", "CHECKOUT_ABANDONED", "User dropped off before completing checkout OTP."],
+    [FailureClass.RECEIVABLE_OVERDUE, 0.04, "netbanking", "RECEIVABLE_OVERDUE", "B2B Net-30 invoice is past due date."],
+  ];
+
+  const sampleAmounts = [50, 4500, 12000, 49900, 120000, 249900, 450000, 650000, 1500000];
+  const customerNames = [
+    "Priya Patel", "Vikram Malhotra", "Neha Sharma", "Aditya Rao", "Rajesh Gupta",
+    "Ananya Roy", "Ramesh Kumar", "Siddharth Enterprises", "Sneha Iyer", "Apex Digital Solutions",
+    "Aarav Mehta", "Pooja Verma", "Karan Singhania", "Divya Nair", "Rohan Joshi"
+  ];
+  const merchantSegments = ["standard", "growth", "enterprise"];
+
+  // Pseudo-random deterministic generator using seed
+  let currentSeed = seed;
+  function seededRandom() {
+    const x = Math.sin(currentSeed++) * 10000;
+    return x - Math.floor(x);
+  }
+
+  let totalAtRiskPaise = 0;
+  let totalRecoveredPaise = 0;
+  let totalInterventions = 0;
+  let totalSettled = 0;
+
+  const policyBlocks: Record<string, number> = {
+    NEGATIVE_EV_SKIPPED: 0,
+    HIGH_VALUE_PENDING_APPROVAL: 0,
+    BOUNDS_EXCEEDED: 0,
+    PROMISE_ACTIVE: 0,
+  };
+
+  const statusCounts: Record<string, number> = {};
+  const strategyCounts: Record<string, number> = {};
+  const failureClassBreakdown: Record<string, {
+    count: number;
+    at_risk_paise: number;
+    interventions: number;
+    recovered_paise: number;
+    settled_count: number;
+    strategies: Record<string, number>;
+  }> = {};
+
+  const processedEvents: any[] = [];
+
+  for (let i = 0; i < batchSize; i++) {
+    const roll = seededRandom();
+    let cumulative = 0;
+    let selected = distribution[0];
+    for (const item of distribution) {
+      cumulative += item[1];
+      if (roll <= cumulative) {
+        selected = item;
+        break;
+      }
+    }
+
+    const [fClass, , method, errCode, errDesc] = selected;
+    const amount = sampleAmounts[Math.floor(seededRandom() * sampleAmounts.length)];
+    const custName = customerNames[Math.floor(seededRandom() * customerNames.length)];
+    const segment = merchantSegments[Math.floor(seededRandom() * merchantSegments.length)];
+    const uid = `${seed}_${i.toString().padStart(4, "0")}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const riskType = fClass === FailureClass.RECEIVABLE_OVERDUE ? "RECEIVABLE_OVERDUE"
+      : (fClass === FailureClass.SUBSCRIPTION_FAILED ? "SUBSCRIPTION_HALTED"
+      : (fClass === FailureClass.CHECKOUT_ABANDONED ? "CHECKOUT_ABANDONMENT" : "PAYMENT_FAILURE"));
+
+    totalAtRiskPaise += amount;
+    const fcKey = fClass;
+    if (!failureClassBreakdown[fcKey]) {
+      failureClassBreakdown[fcKey] = {
+        count: 0,
+        at_risk_paise: 0,
+        interventions: 0,
+        recovered_paise: 0,
+        settled_count: 0,
+        strategies: {},
+      };
+    }
+    const fcStat = failureClassBreakdown[fcKey];
+    fcStat.count += 1;
+    fcStat.at_risk_paise += amount;
+
+    const event: PaymentEvent = {
+      id: nextEventId++,
+      payment_id: `pay_batch_${uid}`,
+      order_id: `order_batch_${uid}`,
+      amount,
+      currency: "INR",
+      method,
+      status: "at_risk",
+      risk_type: riskType,
+      source_reference: `pay_batch_${uid}`,
+      due_at: null,
+      merchant_segment: segment,
+      error_code: errCode,
+      error_description: errDesc,
+      error_source: "gateway",
+      error_step: "payment_authentication",
+      error_reason: errCode.toLowerCase(),
+      customer_email: `${custName.toLowerCase().replace(/\s+/g, ".")}@example.com`,
+      customer_contact: "+919876543210",
+      customer_name: custName,
+      webhook_event_id: `evt_batch_${uid}`,
+      raw_payload: JSON.stringify({ batch_run: true, seed }),
+      created_at: new Date().toISOString(),
+    };
+
+    paymentEvents.push(event);
+
+    const action = runRecoveryPipeline(event, fClass, "Batch benchmark automated run");
+    const statusVal = action.status;
+    const stratVal = action.strategy;
+
+    statusCounts[statusVal] = (statusCounts[statusVal] || 0) + 1;
+    strategyCounts[stratVal] = (strategyCounts[stratVal] || 0) + 1;
+    fcStat.strategies[stratVal] = (fcStat.strategies[stratVal] || 0) + 1;
+
+    if (action.status === ActionStatus.SKIPPED && action.strategy === RecoveryStrategy.NO_ACTION) {
+      policyBlocks.NEGATIVE_EV_SKIPPED += 1;
+    } else if (action.status === ActionStatus.PENDING_APPROVAL) {
+      policyBlocks.HIGH_VALUE_PENDING_APPROVAL += 1;
+    } else if (action.status === ActionStatus.BOUNDS_EXCEEDED) {
+      policyBlocks.BOUNDS_EXCEEDED += 1;
+    } else if (action.status === ActionStatus.PROMISE_ACTIVE) {
+      policyBlocks.PROMISE_ACTIVE += 1;
+    }
+
+    const isIntervention = action.status === ActionStatus.SUCCESS || action.status === ActionStatus.RECOVERED || action.status === ActionStatus.EXECUTING;
+    if (isIntervention) {
+      totalInterventions += 1;
+      fcStat.interventions += 1;
+
+      const shouldRecover = seededRandom() < autoPayRate;
+      if (autoPay && shouldRecover) {
+        action.status = ActionStatus.RECOVERED;
+        event.status = "recovered";
+        totalSettled += 1;
+        totalRecoveredPaise += amount;
+        fcStat.settled_count += 1;
+        fcStat.recovered_paise += amount;
+      }
+    }
+
+    processedEvents.push({
+      payment_id: event.payment_id,
+      customer_name: event.customer_name,
+      amount_rupees: Math.round((event.amount / 100) * 100) / 100,
+      failure_class: action.failure_class,
+      strategy: action.strategy,
+      status: action.status,
+      opportunity_score: Math.round(((action.expected_recovery_amount || 0) / 100) * 100) / 100,
+      confidence: action.recovery_confidence,
+    });
+  }
+
+  const durationSec = Math.round(((Date.now() - startTime) / 1000) * 1000) / 1000;
+  const valueRecoveryRatePct = Math.round((totalRecoveredPaise / Math.max(totalAtRiskPaise, 1)) * 1000) / 10;
+  const eventRecoveryRatePct = Math.round((totalSettled / Math.max(batchSize, 1)) * 1000) / 10;
+  const interventionRatePct = Math.round((totalInterventions / Math.max(batchSize, 1)) * 1000) / 10;
+
+  const fcSummary: Record<string, any> = {};
+  for (const [fcName, data] of Object.entries(failureClassBreakdown)) {
+    const atRiskRupees = Math.round((data.at_risk_paise / 100) * 100) / 100;
+    const recRupees = Math.round((data.recovered_paise / 100) * 100) / 100;
+    const recRate = Math.round((recRupees / Math.max(atRiskRupees, 0.01)) * 1000) / 10;
+    const topStrategy = Object.entries(data.strategies).sort((a, b) => b[1] - a[1])[0]?.[0] || "NO_ACTION";
+
+    fcSummary[fcName] = {
+      count: data.count,
+      at_risk_rupees: atRiskRupees,
+      recovered_rupees: recRupees,
+      recovery_rate_pct: recRate,
+      interventions: data.interventions,
+      settled_count: data.settled_count,
+      primary_strategy: topStrategy,
+    };
+  }
+
+  return res.json({
+    status: "success",
+    timestamp: new Date().toISOString(),
+    batch_size: batchSize,
+    seed,
+    duration_seconds: durationSec,
+    total_at_risk_rupees: Math.round((totalAtRiskPaise / 100) * 100) / 100,
+    total_recovered_rupees: Math.round((totalRecoveredPaise / 100) * 100) / 100,
+    value_recovery_rate_pct: valueRecoveryRatePct,
+    event_recovery_rate_pct: eventRecoveryRatePct,
+    total_interventions: totalInterventions,
+    intervention_rate_pct: interventionRatePct,
+    total_settled_recoveries: totalSettled,
+    policy_blocks: policyBlocks,
+    status_distribution: statusCounts,
+    strategy_distribution: strategyCounts,
+    by_failure_class: fcSummary,
+    events_sample: processedEvents.slice(0, 15),
+  });
+});
 
 app.post("/demo/razorpay-test/payment-link", async (req, res): Promise<any> => {
   const currentSettings = getEffectiveSettings();

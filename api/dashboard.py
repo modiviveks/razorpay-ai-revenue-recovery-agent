@@ -47,9 +47,9 @@ h1{{margin:18px 0 8px}} .amount{{font-size:32px;font-weight:800;margin:20px 0}} 
 button{{width:100%;padding:14px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-size:15px;font-weight:700;cursor:pointer}}
 button:disabled{{background:#94a3b8;cursor:default}} #result{{margin-top:16px;font-weight:700}}
 </style></head><body><main class='card'>
-<span class='tag'>LOCAL DEMO · NO REAL MONEY</span><h1>Recovery checkout</h1>
+<span class='tag'>SANDBOX / MOCK MODE · NO REAL MONEY</span><h1>Recovery checkout</h1>
 <p>Payment link <code>{html.escape(payment_link_id)}</code></p><div class='amount'>{amount}</div>
-<p>Current status: <strong id='status'>{html.escape(status)}</strong>. This page exists only in mock mode for a clickable buildathon demonstration.</p>
+<p>Current status: <strong id='status'>{html.escape(status)}</strong>. This page simulates payment checkout in mock mode.</p>
 <button id='pay' {disabled} onclick='pay()'>{button_text}</button><div id='result'></div>
 <script>async function pay(){{const response=await fetch('/demo/payment-links/{html.escape(payment_link_id)}/pay',{{method:'POST'}});const data=await response.json();document.getElementById('result').textContent=data.message||data.detail;if(response.ok){{document.getElementById('status').textContent='RECOVERED';document.getElementById('pay').disabled=true;document.getElementById('pay').textContent='Payment verified';}}}}</script>
 </main></body></html>"""
@@ -89,6 +89,30 @@ from models import FailureClass
 class SimulatePayload(BaseModel):
     scenario: str
     mark_recovered: bool = False
+
+
+class BatchEvalPayload(BaseModel):
+    batch_size: int = 50
+    seed: int = 42
+    auto_pay: bool = True
+    auto_pay_rate: float = 0.65
+
+
+@router.post("/demo/batch-evaluation")
+def trigger_batch_evaluation_api(payload: BatchEvalPayload = BatchEvalPayload()):
+    """Triggers a comprehensive batch evaluation across synthetic events and updates BATCH_REPORT.md."""
+    if not settings.MOCK_RAZORPAY:
+        raise HTTPException(status_code=403, detail="Batch evaluation is only available in mock mode")
+    from simulator.batch_eval import run_batch_evaluation
+    results = run_batch_evaluation(
+        batch_size=payload.batch_size,
+        seed=payload.seed,
+        auto_pay=payload.auto_pay,
+        auto_pay_rate=payload.auto_pay_rate,
+        output_report=True,
+        report_path="BATCH_REPORT.md",
+    )
+    return results
 
 
 SCENARIOS_DEF = {

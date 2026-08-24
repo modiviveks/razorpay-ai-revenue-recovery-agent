@@ -1,113 +1,128 @@
- RazorRevive — Autonomous AI Revenue Recovery Agent
+# RazorRevive — Payment Revenue Recovery Agent
 
-> **An Autonomous, Bounded, Closed-Loop Payment & Receivables Recovery Engine for the Razorpay Ecosystem.**
-> Diagnoses payment drop-offs, predicts recovery propensity, maximizes expected recovery value (EV) net of intervention costs, and autonomously orchestrates recovery actions directly via Razorpay APIs with full human governance and tamper-proof cryptographic audit trails.
+A payment failure recovery system for the Razorpay ecosystem. It ingests failed payment webhooks, classifies root causes, calculates recovery propensity, evaluates net expected recovery value (EV), and executes recovery interventions via Razorpay APIs subject to deterministic safety policies and cryptographic audit trails.
 
 ---
 
- Executive Overview & Problem Statement
+## Architecture Overview
 
-In the Indian digital payments ecosystem (UPI, cards, netbanking, recurring mandates), payment failures cause massive revenue leakage for merchants:
-- **UPI Switch Timeouts & Bank Gateway Drops**: Transient network issues account for over 35% of checkout drop-offs.
-- **Customer Friction & Alert Fatigue**: Indiscriminate retry spam annoys buyers, increases churn, and risks chargebacks.
-- **Negative Expected-Value Interventions**: Sending SMS/WhatsApp payment links on sub-rupee or low-ticket orders costs more in API fees and friction than the order value.
-- **Lack of Verification & True Incremental Measurement**: Many systems claim 100% of organic customer retries as "AI recovered" without running a rigorous treatment vs. control benchmark.
+When a payment drops off or fails (UPI timeouts, gateway drops, card declines), RazorRevive runs a deterministic recovery pipeline:
 
-**RazorRevive** solves this through a rigorous 9-stage closed-loop architecture:
-
-```
-[ Ingest (Idempotent Webhooks) ]
-               │
-               ▼
-[ Diagnose (Rule-Based Classifier + Degradation Detector) ]
-               │
-               ▼
-[ Predict (Calibrated ML Recovery Propensity) ]
-               │
-               ▼
-[ Rank (Next-Best-Action & Opportunity Scoring) ]
-               │
-               ▼
-[ Policy Gate (Bounded Retries, High-Value Approval, Promises) ]
-               │
-               ▼
-[ Execute (Transactional Outbox Worker & Razorpay Payment Links) ]
-               │
-               ▼
-[ Audit (Cryptographic SHA-256 Hash Chain per Action) ]
-               │
-               ▼
-[ Verify & Reconcile (Razorpay payment_link.paid Ingestion) ]
-               │
-               ▼
-[ Measure & Learn (A/B Synthetic Significance & Decile Calibration) ]
+```mermaid
+flowchart TD
+    A[Ingest: Webhooks & Drop-offs] --> B[Diagnose: Rule-Based Classifier & Network Degradation]
+    B --> C[Predict: ML Propensity Model]
+    C --> D[Rank: Net Expected Value & Next-Best-Action]
+    D --> E{Policy Gates & Stopping Rules}
+    E -- Negative EV --> F1[NO_ACTION: Suppress to Protect Margins]
+    E -- Exceeded Retries --> F2[BOUNDS_EXCEEDED: Quota Cap]
+    E -- Active Promise --> F3[PROMISE_ACTIVE: Pause Outreach]
+    E -- Over Threshold --> F4[PENDING_APPROVAL: Human Sign-off]
+    E -- Eligible --> G[Execute: Razorpay Payment Link API]
+    G --> H[Audit: SHA-256 Cryptographic Hash Chain]
+    H --> I[Reconciliation: payment_link.paid Ingestion]
+    I --> J[Evaluation: Batch Metrics & Measured Recovery]
+    
+    subgraph AI vs Deterministic Boundaries
+        K[LLM / Advisor: Non-Authoritative Drafts & Explanations]
+        L[Deterministic Core: Policy, Pricing, Bounds, Financial Execution]
+    end
+    D -. Advisory Context .-> K
+    K -. Output Draft .-> G
 ```
 
 ---
 
-##  Key Innovations & Architectural Pillars
+## Role of AI vs. Deterministic Policy Boundaries
 
-### 1. Transparent Opportunity Scoring & Explicit `NO_ACTION`
-Instead of treating all failed payments equally, the Next-Best-Action (NBA) engine computes the **Net Opportunity Score**:
+To satisfy compliance, auditability, and financial safety requirements, the system enforces a strict boundary between deterministic control logic and advisory AI components:
+
+1. **Deterministic Authority**:
+   - **Strategy selection, stopping rules, retry quotas, high-value approval gates, and cryptographic hashing** are executed entirely in deterministic Python code.
+   - The ML model and advisory layers cannot override retry quotas, bypass approval thresholds, or trigger unauthorized API calls.
+
+2. **Scoped Downstream Advisory (LLM)**:
+   - When `OPENAI_API_KEY` is configured, an LLM drafts customer outreach copy (`agent/outreach.py`) and operator-facing explanations (`agent/advisor.py`).
+   - The LLM receives scrubbed, non-PII operational context and does not access raw banking details.
+
+3. **Static Fallbacks (Zero Configuration)**:
+   - If no LLM API key is provided, the system falls back to static templates and heuristic priors without degrading core recovery logic or link generation.
+
+---
+
+## Core Components
+
+### 1. Net Opportunity Scoring & Explicit `NO_ACTION`
+Instead of retrying every failed payment uniformly, the engine ranks candidate strategies by **Net Opportunity Score**:
+
 $$\text{Opportunity Score} = P(\text{Recovery}) \times \text{Amount} - \text{Intervention Cost} - \text{Friction Penalty}$$
-- **Explicit `NO_ACTION`**: If all candidate actions yield negative expected value (e.g., micro-transactions < ₹1.00 or severe fraud declines), the engine outputs `NO_ACTION` to protect merchant margins and customer trust.
-- **Action-Specific Costs & Friction**: Tailored penalties for instant retries, WhatsApp payment links, alternate method suggestions, and grace period extensions.
+
+- **Explicit `NO_ACTION`**: When all candidate actions yield negative expected value (such as sub-rupee micro-transactions or irreversible declines), the engine outputs `NO_ACTION` to avoid unnecessary messaging fees and buyer friction.
+- **Cost & Friction Penalties**: Distinct cost and friction weightings are assigned to instant retries, WhatsApp payment links, alternate method suggestions, and grace period extensions.
 
 ### 2. Payment Network Degradation Detector
-- Monitors a sliding window of recent transactions per payment method (`UPI`, `CARD`, `NETBANKING`, `WALLET`).
+- Tracks a rolling window of recent transactions across payment methods (`UPI`, `CARD`, `NETBANKING`, `WALLET`).
 - Flags **MODERATE** (>7% drop from baseline) and **CRITICAL** (>15% drop) network switch outages.
-- Automatically suppresses immediate retry actions during upstream bank outages, advising merchants to route users to alternate payment methods.
+- Temporarily suppresses immediate retries during upstream bank outages and recommends routing users to alternative payment methods.
 
-### 3. Explainable Next-Best-Action
-- Generates transparent, human-readable explanations for every recovery decision:
-  - **Why Selected**: Net expected value breakdown and primary recovery drivers.
-  - **Why Rejected**: Clear mathematical or policy reasons why other candidate strategies were disqualified.
-  - **Active Policy Constraints**: Explicit checks for max retry bounds, cooling periods, and active promises-to-pay.
+### 3. Decision Explainability
+Every recovery decision records structured rationale:
+- **Selected Action**: Net expected value breakdown and primary recovery drivers.
+- **Rejected Alternatives**: Policy or mathematical reasons why other candidate strategies were disqualified.
+- **Policy Constraints**: Status of retry limits, cooling periods, and customer promise-to-pay states.
 
-### 4. Human-in-the-Loop High-Value Approval Queue
-- High-ticket recovery actions (exceeding ₹5,000 / 500,000 paise) are placed into `PENDING_APPROVAL`.
-- Merchant admins can review pending opportunities, inspect proposed strategies and customer details, and either **Approve** or **Reject** with audit trail justification.
+### 4. High-Value Human Approval Queue
+- High-ticket recovery actions exceeding the configured threshold (default: ₹5,000 / 500,000 paise) are placed into `PENDING_APPROVAL`.
+- Operators can review pending actions, inspect proposed strategies, and approve or reject them with audit trail justifications.
 
-### 5. Calibrated Machine Learning Propensity Model
-- Powered by `recovery-logreg-v2`, trained on non-PII operational signals (amount, failure class, payment method, retry count, time of day, merchant tier, aggregate historical success).
-- Evaluated via ROC-AUC, Brier score, and a 10-decile calibration report comparing predicted probabilities against observed recovery rates.
+### 5. Propensity Scoring Model
+- Uses a calibrated logistic regression model trained on non-PII features (amount, failure class, payment method, retry count, time of day, merchant tier, aggregate historical success).
+- Evaluated via ROC-AUC, Brier score, and a 10-decile calibration report comparing predicted probabilities against observed outcomes.
 
-### 6. Rigorous Statistical Experimentation
-- Integrated 10,000-event synthetic treatment/control A/B benchmarking tool (`simulator/experiment.py`).
-- Computes two-proportion Z-tests, p-values, 95% Confidence Intervals, and absolute/relative lift to verify that reported recovery gains represent true incremental lift over natural buyer retries.
+### 6. Synthetic Benchmarking & Statistical Evaluation
+- Includes a 10,000-event synthetic treatment/control simulation tool (`simulator/experiment.py`).
+- Computes two-proportion Z-tests, p-values, 95% Confidence Intervals, and absolute/relative lift to verify incremental recovery over natural buyer retries.
 
-### 7. Cryptographic Audit Trail & Security
-- Every decision, state transition, and API interaction is logged with a **SHA-256 cryptographic hash chain** ($H_i = \text{SHA256}(H_{i-1} \parallel \text{Step} \parallel \text{Payload})$).
-- Verifiable at any time via `/api/audit-trail/{action_id}/verify` to guarantee tamper-evident compliance.
-
----
-
-##  Interactive Dashboard Features
-
-The web interface (`/static/dashboard.html`) provides a real-time command center:
-- **Executive Recovery Funnel**: Visual 4-stage conversion tracking (Failed Events → Policy-Eligible → Interventions Attempted → Settled Recoveries) with drop-off accounting (Retries Exceeded, Awaiting Approval, Active Promise Paused, Negative-EV Skipped).
-- **Payment Network Degradation Monitor**: Live status cards tracking UPI, Card, Netbanking, and Wallet health with automated root-cause hypotheses.
-- **Merchant Segment Analytics**: Granular performance comparisons across Standard, Growth, and Enterprise merchant tiers.
-- **Explainable Decision Inspector**: Deep dive into individual events showing EV math, alternative rejection reasons, outreach drafts, and cryptographic audit steps.
-- **High-Value Approvals Modal**: Streamlined sign-off queue for merchant operations teams.
-- **Model Calibration Modal**: 10-decile predicted vs. observed calibration table with ROC-AUC and Brier metrics.
-- **Interactive Failure Simulator Toolbar**: One-click injection of 10+ payment failure scenarios.
+### 7. Cryptographic Audit Trail
+- Each decision, state transition, and API interaction is appended to a **SHA-256 hash chain** ($H_i = \text{SHA256}(H_{i-1} \parallel \text{Step} \parallel \text{Payload})$).
+- The integrity of the chain can be verified at any time via `/api/audit-trail/{action_id}/verify`.
 
 ---
 
-##  Quick Start & Local Execution
+## Operations Console
 
-### 1. Installation & Environment Setup
+The web interface (`/static/dashboard.html`) provides operational visibility:
+- **Recovery Funnel**: 4-stage tracking (Failed Events → Policy-Eligible → Interventions Attempted → Settled Recoveries) with drop-off counters (Retries Exceeded, Awaiting Approval, Active Promise Paused, Negative-EV Skipped).
+- **Network Health**: Status cards tracking UPI, Card, Netbanking, and Wallet success rates with automated root-cause hypotheses.
+- **Segment Breakdown**: Performance comparisons across Standard, Growth, and Enterprise merchant tiers.
+- **Decision Inspector**: Detail view for individual events showing EV calculations, rejected alternatives, outreach drafts, and cryptographic audit steps.
+- **Approvals Queue**: Review queue for high-value transactions.
+- **Model Calibration View**: 10-decile predicted vs. observed calibration table with ROC-AUC and Brier metrics.
+- **Scenario Testing**: Interactive trigger controls to test failure events in sandbox mode.
+
+---
+
+## Setup & Local Execution
+
+### 1. Installation
+
+**macOS / Linux:**
 ```bash
-# Clone the repository
 git clone https://github.com/modiviveks/razorpay-ai-revenue-recovery-agent.git
 cd razorpay-ai-revenue-recovery-agent
 
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-# Install dependencies
+**Windows (PowerShell / Command Prompt):**
+```powershell
+git clone https://github.com/modiviveks/razorpay-ai-revenue-recovery-agent.git
+cd razorpay-ai-revenue-recovery-agent
+
+python -m venv .venv
+.venv\Scripts\Activate.ps1   # Command Prompt: .venv\Scripts\activate.bat
 pip install -r requirements.txt
 ```
 
@@ -120,85 +135,92 @@ python -m agent.train_model
 ```bash
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
-Open your browser at `http://127.0.0.1:8000/` to access the Enterprise Dashboard.
+Open `http://127.0.0.1:8000/` to access the Operations Console.
 
 ### 4. Start the Background Outbox Worker (Separate Terminal)
 ```bash
 python -m agent.worker
 ```
 
-### 5. Run Scenario Simulations & A/B Experiment
+### 5. Run Scenario Simulations & Batch Evaluation
 ```bash
-# Trigger simulated failure scenarios (with auto-pay verification)
+# Run 50-event batch evaluation benchmark (generates BATCH_REPORT.md)
+python -m simulator.batch_eval --batch 50 --seed 42
+
+# Trigger simulated failure scenarios via runner
 python simulator/scenario_runner.py --scenario all --mark-recovered
 
-# Run 10,000-event synthetic A/B experiment with statistical confidence
+# Run 10,000-event synthetic A/B benchmark
 python -m simulator.experiment --size 10000
 ```
 
-### 6. Run Full Test Suite
+### 6. Run Test Suite
 ```bash
 pytest -v
 ```
-All 48 unit and integration tests validate the entire recovery pipeline, degradation detector, opportunity scorer, approval queue, statistical inference engine, and the Razorpay Test Mode integration.
 
 ---
 
-##  Razorpay Runtime Modes: Mock vs. Test Mode
+## Runtime Modes: Mock vs. Test Mode
 
-The recovery agent supports two runtime modes configured via `RAZORPAY_MODE`:
+Configured via `RAZORPAY_MODE` in `.env`:
 
 ### 1. Mock Mode (`RAZORPAY_MODE=mock`, Default)
-- **Zero Configuration**: Fully functional out of the box without external dependencies.
-- **Local Simulation**: Simulates payment link creation, simulated checkout redirect pages, and instant webhook confirmations.
-- **Safe Demonstration**: Allows triggering failure scenarios, B2B promises, high-value approvals, and 10,000-event A/B benchmarks safely offline.
+- Functional out of the box with zero external dependencies.
+- Simulates payment link creation, simulated checkout pages, and webhook confirmations locally.
+- Intended for local development, scenario testing, and offline benchmarking.
 
 ### 2. Razorpay Test Mode (`RAZORPAY_MODE=test`)
-- **Authentic Razorpay API Integration**: Communicates directly with the official Razorpay Test API using `razorpay-python` SDK.
-- **Real Payment Links**: Generates actual Razorpay Payment Links (`https://rzp.io/i/...`) in Test Mode that can be tested in Razorpay's sandbox.
-- **Official Webhook Verification**: Cryptographically verifies `X-Razorpay-Signature` HMAC-SHA256 headers for all incoming webhook events (`payment.failed`, `payment_link.paid`).
-- **Strict Safety Boundaries**:
-  - **No Live Mode**: The system strictly forbids `rzp_live_...` keys and refuses to start if live credentials are provided.
-  - **No Silent Fallback**: If an API call fails in Test Mode, it records an explicit `FAILED` audit record rather than silently falling back to mock behavior.
-- **Configuration (.env)**:
-  ```env
-  RAZORPAY_MODE=test
-  RAZORPAY_KEY_ID=rzp_test_YourKeyIdHere
-  RAZORPAY_KEY_SECRET=YourTestSecretHere
-  RAZORPAY_WEBHOOK_SECRET=YourWebhookSecretHere
-  ```
+- Communicates directly with the Razorpay API using `razorpay-python`.
+- Generates real Razorpay Payment Links (`https://rzp.io/i/...`) in Razorpay's sandbox.
+- Verifies `X-Razorpay-Signature` HMAC-SHA256 headers on incoming webhooks (`payment.failed`, `payment_link.paid`).
+- Safety rules:
+  - Live API keys (`rzp_live_...`) are rejected on startup.
+  - If a test API call fails, it records an explicit `FAILED` audit record without silent fallback.
+
+**Configuration (`.env`):**
+```env
+RAZORPAY_MODE=test
+RAZORPAY_KEY_ID=rzp_test_YourKeyIdHere
+RAZORPAY_KEY_SECRET=YourTestSecretHere
+RAZORPAY_WEBHOOK_SECRET=YourWebhookSecretHere
+```
 
 ---
 
-##  Key API Endpoints
+## API Reference
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/` | Serves the interactive Enterprise Dashboard UI |
-| `POST` | `/webhook/razorpay` | Authenticated webhook intake for payment failures and `payment_link.paid` events (HMAC-SHA256 verified in Test Mode) |
-| `POST` | `/demo/razorpay-test/payment-link` | Triggers an end-to-end recovery action generating an authentic Razorpay Test Mode link |
-| `GET` | `/api/stats` | High-level recovery metrics, at-risk totals, conversion rates, and runtime mode indicator |
-| `GET` | `/api/events` | Stream of recent payment failure events and autonomous agent actions |
-| `GET` | `/api/analytics/funnel` | 4-stage executive recovery funnel and drop-off accounting |
-| `GET` | `/api/analytics/segments` | Merchant segment performance (Standard, Growth, Enterprise) |
-| `GET` | `/api/network/degradation-status` | Real-time payment network health and switch latency metrics |
+| `GET` | `/` | Serves the Operations Console UI |
+| `POST` | `/webhook/razorpay` | Ingests payment failure and `payment_link.paid` webhooks (HMAC-SHA256 verified in Test Mode) |
+| `POST` | `/demo/razorpay-test/payment-link` | Triggers a recovery action generating a Razorpay Test Mode link |
+| `GET` | `/api/stats` | Recovery metrics, at-risk totals, conversion rates, and runtime mode |
+| `GET` | `/api/events` | Stream of recent payment failure events and agent actions |
+| `GET` | `/api/analytics/funnel` | 4-stage recovery funnel and drop-off accounting |
+| `GET` | `/api/analytics/segments` | Segment performance metrics (Standard, Growth, Enterprise) |
+| `GET` | `/api/network/degradation-status` | Payment network health and switch latency metrics |
 | `GET` | `/api/actions/pending-approvals` | High-value actions awaiting human sign-off |
-| `POST` | `/api/actions/{id}/approve` | Merchant admin approves a high-ticket recovery action |
-| `POST` | `/api/actions/{id}/reject` | Merchant admin rejects/cancels a recovery action |
-| `GET` | `/api/audit-trail/{id}` | Cryptographic step-by-step audit trail for an action |
+| `POST` | `/api/actions/{id}/approve` | Approves a high-ticket recovery action |
+| `POST` | `/api/actions/{id}/reject` | Rejects/cancels a recovery action |
+| `GET` | `/api/audit-trail/{id}` | Cryptographic audit trail for an action |
 | `GET` | `/api/audit-trail/{id}/verify` | Validates SHA-256 hash integrity across the audit chain |
-| `GET` | `/api/model/metrics` | Model calibration metrics, ROC-AUC, Brier score, and 10-decile table |
-| `POST` | `/api/experiments/simulate` | Executes a synthetic A/B impact benchmark with 95% CI |
+| `GET` | `/api/model/metrics` | Model calibration metrics, ROC-AUC, Brier score, and decile table |
+| `POST` | `/api/experiments/simulate` | Runs a synthetic A/B benchmark with 95% CI |
 | `POST` | `/demo/simulate` | Dispatches simulated webhook failure scenarios in mock mode |
-| `POST` | `/demo/reset` | Clears all mock data for a clean demonstration run |
+| `POST` | `/demo/batch-evaluation` | Runs automated 50-event batch evaluation benchmark with stopping rules accounting |
+| `POST` | `/demo/reset` | Resets local mock state |
 
 ---
 
-##  Production & Security Considerations
+## Security & Operational Controls
 
-1. **Deterministic Authority**: The AI model and advisory layers can only suggest candidates and calculate opportunity scores. Hard boundaries (retry caps, cooling intervals, human approvals, customer promises) are strictly enforced in Python code and cannot be bypassed.
-2. **PII Minimization**: Audit logs and metric payloads scrub customer email addresses and phone numbers; only non-PII operational features are retained.
-3. **Outbox Reliability**: Webhooks persist events into a durable PostgreSQL/SQLite transactional outbox before processing, guaranteeing at-least-once delivery with exponential backoff.
-4. **Zero Financial Risk**: The recovery agent only generates payment links; it never stores credentials or initiates customer debits.
+1. **Deterministic Authority**: Hard boundaries (retry caps, cooling periods, human approvals, customer promises) are enforced in application code and cannot be overridden by ML or LLM components.
+2. **PII Scrubbing**: Customer contact details (email, phone) are scrubbed before logging; only non-PII operational signals are retained in audit records.
+3. **Outbox Reliability**: Webhooks persist events into a durable transactional outbox before processing to guarantee delivery.
+4. **Non-Custodial Design**: The recovery agent only generates payment links; it never stores payment credentials or initiates unauthorized debits.
 
 ---
+
+## License
+MIT License.

@@ -191,8 +191,8 @@ def run_experiment(db, sample_size: int = 10_000, seed: int = 2026, experiment_i
         }
 
     results = {
-        "label": "SIMULATED — not real Razorpay merchant revenue",
-        "notice": "Results reflect a synthetic local benchmark designed for buildathon evaluation. Do not imply real-world causal certainty without running an A/B test on production traffic.",
+        "label": "SIMULATED — Synthetic benchmark data",
+        "notice": "Results reflect a synthetic local benchmark. Real-world performance requires evaluating against an A/B test on live production traffic.",
         "experiment_id": experiment_id,
         "sample_size": sample_size,
         "seed": seed,

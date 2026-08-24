@@ -1,4 +1,4 @@
-"""CLI Tool to simulate Razorpay payment failures and post webhooks to the local FastAPI server."""
+"""CLI Tool to simulate Razorpay payment failures, post webhooks, and execute batch benchmark evaluations."""
 
 import argparse
 import sys
@@ -6,6 +6,7 @@ import json
 import time
 import httpx
 from scenarios import SCENARIOS, get_payment_link_paid_payload
+from batch_eval import run_batch_evaluation
 
 DEFAULT_URL = "http://127.0.0.1:8000/webhook/razorpay"
 
@@ -50,13 +51,25 @@ def post_webhook(url: str, payload: dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Razorpay Failure Webhook Simulator")
+    parser = argparse.ArgumentParser(description="Razorpay Failure Webhook Simulator & Batch Evaluator")
     parser.add_argument(
         "--scenario",
         type=str,
         choices=list(SCENARIOS.keys()) + ["all"],
         default="all",
         help="The failure scenario to trigger (default: all)"
+    )
+    parser.add_argument(
+        "--batch",
+        type=int,
+        default=None,
+        help="Run batch evaluation with N simulated events and generate BATCH_REPORT.md (e.g. --batch 50)"
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible batch evaluation (default: 42)"
     )
     parser.add_argument(
         "--mark-recovered",
@@ -77,6 +90,24 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # If --batch is provided, trigger batch evaluation and produce BATCH_REPORT.md
+    if args.batch is not None and args.batch > 0:
+        print(f"--- Running Batch Evaluation ({args.batch} events, seed={args.seed}) ---")
+        results = run_batch_evaluation(
+            batch_size=args.batch,
+            seed=args.seed,
+            auto_pay=args.mark_recovered,
+            output_report=True,
+            report_path="BATCH_REPORT.md",
+        )
+        print(f"\n[Batch Summary]")
+        print(f"  Total At Risk     : ₹{results['total_at_risk_rupees']:,.2f}")
+        print(f"  Settled Recovered : ₹{results['total_recovered_rupees']:,.2f} ({results['value_recovery_rate_pct']:.1f}%)")
+        print(f"  Interventions     : {results['total_interventions']} ({results['intervention_rate_pct']:.1f}%)")
+        print(f"  Policy Blocks     : {results['policy_blocks']}")
+        print(f"  Report generated  : BATCH_REPORT.md")
+        return
     
     if args.scenario == "all":
         print(f"--- Running ALL {len(SCENARIOS)} simulated failure scenarios against {args.url} ---")
