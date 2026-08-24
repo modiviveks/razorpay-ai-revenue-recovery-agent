@@ -263,8 +263,8 @@ def simulate_scenario(payload: SimulatePayload, db: Session = Depends(get_db)):
         action = run_recovery_pipeline(
             db=db,
             event=event,
-            override_failure_class=None,
-            classification_rationale=f"Simulated test scenario: {sc_key}",
+            forced_failure_class=None,
+            forced_rationale=f"Simulated test scenario: {sc_key}",
         )
 
         if payload.mark_recovered and action.status in {ActionStatus.SUCCESS, ActionStatus.PENDING}:
