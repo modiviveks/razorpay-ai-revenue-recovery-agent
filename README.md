@@ -1,11 +1,11 @@
-# ⚡ RazorRevive — Autonomous AI Revenue Recovery Agent
+ RazorRevive — Autonomous AI Revenue Recovery Agent
 
 > **An Autonomous, Bounded, Closed-Loop Payment & Receivables Recovery Engine for the Razorpay Ecosystem.**
 > Diagnoses payment drop-offs, predicts recovery propensity, maximizes expected recovery value (EV) net of intervention costs, and autonomously orchestrates recovery actions directly via Razorpay APIs with full human governance and tamper-proof cryptographic audit trails.
 
 ---
 
-## 🎯 Executive Overview & Problem Statement
+ Executive Overview & Problem Statement
 
 In the Indian digital payments ecosystem (UPI, cards, netbanking, recurring mandates), payment failures cause massive revenue leakage for merchants:
 - **UPI Switch Timeouts & Bank Gateway Drops**: Transient network issues account for over 35% of checkout drop-offs.
@@ -45,7 +45,7 @@ In the Indian digital payments ecosystem (UPI, cards, netbanking, recurring mand
 
 ---
 
-## 🚀 Key Innovations & Architectural Pillars
+##  Key Innovations & Architectural Pillars
 
 ### 1. Transparent Opportunity Scoring & Explicit `NO_ACTION`
 Instead of treating all failed payments equally, the Next-Best-Action (NBA) engine computes the **Net Opportunity Score**:
@@ -82,7 +82,7 @@ $$\text{Opportunity Score} = P(\text{Recovery}) \times \text{Amount} - \text{Int
 
 ---
 
-## 📊 Interactive Dashboard Features
+##  Interactive Dashboard Features
 
 The web interface (`/static/dashboard.html`) provides a real-time command center:
 - **Executive Recovery Funnel**: Visual 4-stage conversion tracking (Failed Events → Policy-Eligible → Interventions Attempted → Settled Recoveries) with drop-off accounting (Retries Exceeded, Awaiting Approval, Active Promise Paused, Negative-EV Skipped).
@@ -95,7 +95,7 @@ The web interface (`/static/dashboard.html`) provides a real-time command center
 
 ---
 
-## 🛠️ Quick Start & Local Execution
+##  Quick Start & Local Execution
 
 ### 1. Installation & Environment Setup
 ```bash
@@ -144,7 +144,7 @@ All 48 unit and integration tests validate the entire recovery pipeline, degrada
 
 ---
 
-## ⚡ Razorpay Runtime Modes: Mock vs. Test Mode
+##  Razorpay Runtime Modes: Mock vs. Test Mode
 
 The recovery agent supports two runtime modes configured via `RAZORPAY_MODE`:
 
@@ -170,7 +170,7 @@ The recovery agent supports two runtime modes configured via `RAZORPAY_MODE`:
 
 ---
 
-## 🔗 Key API Endpoints
+##  Key API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -194,7 +194,7 @@ The recovery agent supports two runtime modes configured via `RAZORPAY_MODE`:
 
 ---
 
-## 🛡️ Production & Security Considerations
+##  Production & Security Considerations
 
 1. **Deterministic Authority**: The AI model and advisory layers can only suggest candidates and calculate opportunity scores. Hard boundaries (retry caps, cooling intervals, human approvals, customer promises) are strictly enforced in Python code and cannot be bypassed.
 2. **PII Minimization**: Audit logs and metric payloads scrub customer email addresses and phone numbers; only non-PII operational features are retained.
