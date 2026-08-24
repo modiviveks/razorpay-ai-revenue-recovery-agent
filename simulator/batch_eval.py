@@ -82,7 +82,7 @@ def generate_synthetic_batch(
         amount = rng.choice(SAMPLE_AMOUNTS_PAISE)
         cust_name = rng.choice(CUSTOMER_NAMES)
         segment = rng.choice(MERCHANT_SEGMENTS)
-        uid = f"{seed}_{i:04d}_{uuid.uuid4().hex[:4]}"
+        uid = f"{seed}_{i:04d}_{rng.getrandbits(16):04x}"
 
         risk_type = (
             "RECEIVABLE_OVERDUE" if failure_class == FailureClass.RECEIVABLE_OVERDUE
@@ -204,8 +204,8 @@ def run_batch_evaluation(
             action = run_recovery_pipeline(
                 db=db,
                 event=event,
-                override_failure_class=None,
-                classification_rationale="Batch benchmark automated run",
+                forced_failure_class=None,
+                forced_rationale="Batch benchmark automated run",
             )
 
             status_val = action.status.value
