@@ -1,7 +1,6 @@
 """Rank only policy-allowed recovery candidates using propensity, costs, friction, and explicit NO_ACTION."""
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from agent.recovery_model import build_features, predict
 from models import FailureClass, RecoveryStrategy
