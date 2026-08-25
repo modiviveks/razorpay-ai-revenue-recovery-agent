@@ -140,7 +140,7 @@ def execute_recovery(db: Session, action: RecoveryAction, event: PaymentEvent):
                 action_id=action.id,
                 step="EXECUTE_API_SUCCESS",
                 reasoning="Razorpay payment link successfully generated.",
-                api_call=f"POST /v1/payment_links",
+                api_call="POST /v1/payment_links",
                 api_response=response_json,
                 outcome="SUCCESS"
             )
@@ -154,7 +154,7 @@ def execute_recovery(db: Session, action: RecoveryAction, event: PaymentEvent):
                 action_id=action.id,
                 step="EXECUTE_API_FAILURE",
                 reasoning="Razorpay client threw an error while attempting to create payment link.",
-                api_call=f"POST /v1/payment_links",
+                api_call="POST /v1/payment_links",
                 api_response=str(e),
                 outcome="FAILED",
                 error_detail=str(e)
@@ -181,7 +181,7 @@ def execute_recovery(db: Session, action: RecoveryAction, event: PaymentEvent):
             db=db,
             action_id=action.id,
             step="ESCALATE",
-            reasoning="Simulation: Escaled recovery task to the customer success team for direct support intervention.",
+            reasoning="Simulation: Escalated recovery task to the customer success team for direct support intervention.",
             outcome="SUCCESS"
         )
         action.status = ActionStatus.SUCCESS
