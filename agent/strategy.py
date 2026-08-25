@@ -2,6 +2,7 @@
 
 from models import FailureClass, RecoveryStrategy, ActionStatus
 from config import settings
+from agent.next_best_action import POLICY_CANDIDATES
 
 class StrategyResult:
     def __init__(
@@ -102,7 +103,7 @@ def determine_strategy(
         FailureClass.UNKNOWN: {
             "strategy": RecoveryStrategy.ESCALATE_TO_HUMAN,
             "max_retries": 0,
-            "rationale": "Unidentified failure class. Escolating to manual merchant support team."
+            "rationale": "Unidentified failure class. Escalating to manual merchant support team."
         }
     }
 
@@ -124,7 +125,6 @@ def determine_strategy(
     # A model-ranked candidate is accepted only when it is in the policy's
     # explicitly allowed alternatives for this class. Otherwise this policy
     # default is retained.
-    from agent.next_best_action import POLICY_CANDIDATES
     allowed = POLICY_CANDIDATES.get(failure_class, [rule["strategy"]])
     if proposed_strategy in allowed:
         rule = {**rule, "strategy": proposed_strategy,
