@@ -640,7 +640,7 @@ def get_network_degradation_status(db: Session = Depends(get_db)):
 @router.get("/model/metrics", dependencies=[Depends(require_dashboard_key)])
 def get_model_metrics():
     """Returns the trained recovery propensity model calibration and evaluation metrics."""
-    from agent.recovery_model import load_model, ARTIFACT_PATH, train
+    from agent.recovery_model import load_model, train
     bundle = load_model()
     if bundle is None:
         metadata = train(samples=8000, seed=42)
