@@ -1,8 +1,6 @@
 """CLI Tool to simulate Razorpay payment failures, post webhooks, and execute batch benchmark evaluations."""
 
 import argparse
-import sys
-import json
 import time
 import httpx
 from scenarios import SCENARIOS, get_payment_link_paid_payload
@@ -32,14 +30,14 @@ def post_webhook(url: str, payload: dict):
         response = httpx.post(url, json=payload, headers=headers, timeout=5.0)
         if response.status_code == 200:
             res_data = response.json()
-            print(f"[Simulator] SUCCESS (200 OK)")
+            print("[Simulator] SUCCESS (200 OK)")
             print(f"            - Classification : {res_data.get('failure_class')}")
             print(f"            - Strategy       : {res_data.get('strategy')}")
             print(f"            - Action Status  : {res_data.get('action_status')}")
             if res_data.get('new_payment_link'):
                 print(f"            - Recovery Link  : {res_data.get('new_payment_link')}")
             if res_data.get("status") == "recovered":
-                print(f"            - Recovery      : VERIFIED AND ATTRIBUTED")
+                print("            - Recovery      : VERIFIED AND ATTRIBUTED")
             return res_data
         else:
             print(f"[Simulator] FAILED: Status code {response.status_code}")
@@ -101,12 +99,12 @@ def main():
             output_report=True,
             report_path="BATCH_REPORT.md",
         )
-        print(f"\n[Batch Summary]")
+        print("\n[Batch Summary]")
         print(f"  Total At Risk     : ₹{results['total_at_risk_rupees']:,.2f}")
         print(f"  Settled Recovered : ₹{results['total_recovered_rupees']:,.2f} ({results['value_recovery_rate_pct']:.1f}%)")
         print(f"  Interventions     : {results['total_interventions']} ({results['intervention_rate_pct']:.1f}%)")
         print(f"  Policy Blocks     : {results['policy_blocks']}")
-        print(f"  Report generated  : BATCH_REPORT.md")
+        print("  Report generated  : BATCH_REPORT.md")
         return
     
     if args.scenario == "all":
