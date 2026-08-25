@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 from razorpay.errors import SignatureVerificationError
 
 from main import app
-from config import settings, Settings
 from razorpay_client.client import (
     MockClient,
     RazorpayTestClient,
@@ -191,11 +190,6 @@ def test_demo_razorpay_test_endpoint(client):
 
 def test_stats_returns_runtime_mode(client):
     """Verify /api/stats reports runtime_mode and is_test_mode accurately."""
-    response = client.post(
-        "/api/stats",
-        # Note: /api/stats is GET in our router, let's test GET
-    )
-    # If POST is not allowed, do GET
     get_res = client.get("/api/stats")
     assert get_res.status_code == 200
     stats = get_res.json()
