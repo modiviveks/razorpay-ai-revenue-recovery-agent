@@ -10,10 +10,9 @@ import random
 import time
 import uuid
 from collections import defaultdict
-from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from agent.pipeline import run_recovery_pipeline
 from database import SessionLocal, init_db
@@ -21,7 +20,6 @@ from models import (
     ActionStatus,
     FailureClass,
     PaymentEvent,
-    RecoveryAction,
     RecoveryStrategy,
 )
 
