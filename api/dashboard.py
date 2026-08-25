@@ -80,10 +80,8 @@ def pay_mock_payment_link(payment_link_id: str, db: Session = Depends(get_db)):
 
 
 from pydantic import BaseModel
-import random
 import uuid
 from agent.pipeline import run_recovery_pipeline
-from models import FailureClass
 
 
 class SimulatePayload(BaseModel):
